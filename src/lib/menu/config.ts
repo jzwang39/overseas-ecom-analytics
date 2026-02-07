@@ -42,12 +42,6 @@ export const MENU_GROUPS: MenuGroup[] = [
     icon: "folder",
     items: [
       { key: "ops.purchase", label: "选品", href: "/work/ops/purchase", icon: "cart" },
-      {
-        key: "ops.selection_candidates",
-        label: "选品备选表",
-        href: "/work/ops/selection-candidates",
-        icon: "tag",
-      },
       { key: "ops.inquiry", label: "询价", href: "/work/ops/inquiry", icon: "search" },
       { key: "ops.pricing", label: "核价", href: "/work/ops/pricing", icon: "calculator" },
       { key: "ops.confirm", label: "确品", href: "/work/ops/confirm", icon: "badge-check" },

@@ -1,8 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import type { RowDataPacket } from "mysql2";
 import { getSession } from "@/lib/auth/server";
 import { ensureInitialSuperAdmin } from "@/lib/db/seed";
+import { getPool } from "@/lib/db/pool";
+
+export const runtime = "nodejs";
+
+const FALLBACK_FIELDS = ["运营人员", "店铺名称", "产品名称", "SKC", "SKU", "产品规格", "链接标签"];
 
 function normalizeHeaderCell(v: string) {
   return v.replaceAll("\r", "").replaceAll("\n", "").replace(/\s+/g, " ").trim();
@@ -59,6 +65,50 @@ function parseCsvRecords(input: string, maxRecords: number) {
   return records;
 }
 
+function parseJsonCell(v: unknown) {
+  if (!v) return null;
+  if (typeof v === "object" && !(v instanceof Buffer)) return v;
+  if (typeof v === "string") {
+    try {
+      return JSON.parse(v) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  if (v instanceof Buffer) {
+    try {
+      return JSON.parse(v.toString("utf8")) as unknown;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+async function getFieldsFromRecentRecords() {
+  const pool = getPool();
+  const [rows] = await pool.query<(RowDataPacket & { data: unknown })[]>(
+    "SELECT data FROM sales_ops_records ORDER BY id DESC LIMIT 50",
+  );
+  if (rows.length === 0) return [];
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  for (const r of rows) {
+    const raw = parseJsonCell(r.data);
+    const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+    if (!obj) continue;
+    for (const k of Object.keys(obj)) {
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(k);
+    }
+  }
+
+  return out;
+}
+
 function resolveCsvPath() {
   const filename = "至繁运营管理表_运营链接日常跟踪表_表格.csv";
   return [path.join(process.cwd(), "..", filename), path.join(process.cwd(), filename)];
@@ -97,6 +147,10 @@ export async function GET() {
   const session = await getSession();
   if (!session?.user?.id) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const fields = await getCsvHeaderFields();
+  const fromCsv = await getCsvHeaderFields();
+  if (fromCsv.length > 0) return NextResponse.json({ fields: fromCsv });
+
+  const fromDb = await getFieldsFromRecentRecords();
+  const fields = fromDb.length > 0 ? fromDb : FALLBACK_FIELDS;
   return NextResponse.json({ fields });
 }

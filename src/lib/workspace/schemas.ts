@@ -81,28 +81,8 @@ export const PURCHASE_FIELDS: string[] = [
   "最后更新时间",
 ];
 
-export const SELECTION_CANDIDATE_FIELDS: string[] = [
-  "名称",
-  "产品图片",
-  "参考链接",
-  "平台在售价格（Min）",
-  "平台在售价格（Max）",
-  "所属类目",
-  "产品规格",
-  "产品链接×",
-  "预计周平均日销量",
-  "资质要求",
-  "是否有专利风险",
-  "选品逻辑",
-  "选品人",
-  "状态",
-  "创建时间",
-  "最后更新时间",
-];
-
 export const WORKSPACE_SCHEMAS: WorkspaceSchema[] = [
   { key: "ops.purchase", title: "选品-采购管理表", fields: PURCHASE_FIELDS },
-  { key: "ops.selection_candidates", title: "选品备选表", fields: SELECTION_CANDIDATE_FIELDS },
   { key: "ops.inquiry", title: "询价", fields: PURCHASE_FIELDS },
   { key: "ops.pricing", title: "核价", fields: PURCHASE_FIELDS },
 ];

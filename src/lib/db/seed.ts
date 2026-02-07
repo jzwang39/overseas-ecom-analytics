@@ -34,7 +34,6 @@ export async function ensureInitialSuperAdmin() {
 
       const menuKeys = JSON.stringify([
         "ops.selection",
-        "ops.selection_candidates",
         "ops.inquiry",
         "ops.pricing",
         "ops.confirm",

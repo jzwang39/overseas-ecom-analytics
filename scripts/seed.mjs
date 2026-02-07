@@ -52,7 +52,6 @@ async function main() {
 
     const defaultMenuKeys = JSON.stringify([
       "ops.selection",
-      "ops.selection_candidates",
       "ops.inquiry",
       "ops.pricing",
       "ops.confirm",

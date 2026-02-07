@@ -811,7 +811,7 @@ export function WorkspaceClient({
               className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
               onClick={openCreate}
             >
-              {workspaceKey === "ops.selection_candidates" ? "增加选品备选数据" : "新增数据"}
+              新增数据
             </button>
           ) : null}
           <a
