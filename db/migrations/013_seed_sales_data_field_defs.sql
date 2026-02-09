@@ -1,0 +1,22 @@
+INSERT IGNORE INTO record_field_defs(record_type, field_key, sort_order)
+VALUES
+  ('sales_data', '结算流水ID', 1),
+  ('sales_data', '批次号', 2),
+  ('sales_data', 'PO单号', 3),
+  ('sales_data', '单据号', 4),
+  ('sales_data', '交易类型', 5),
+  ('sales_data', '结算金额', 6),
+  ('sales_data', '商品信息 * 销售件数-SKU ID', 7),
+  ('sales_data', 'SKU名称', 8),
+  ('sales_data', 'SKU货号', 9),
+  ('sales_data', '件数', 10),
+  ('sales_data', '申报价格', 11),
+  ('sales_data', '是否活动价', 12),
+  ('sales_data', '币种', 13),
+  ('sales_data', '总申报价格', 14),
+  ('sales_data', '单品优惠券金额', 15),
+  ('sales_data', '店铺满减券优惠金额', 16),
+  ('sales_data', '申报价格折扣金额', 17),
+  ('sales_data', '活动运费主动减免金额', 18),
+  ('sales_data', '到账时间', 19),
+  ('sales_data', '备注', 20);

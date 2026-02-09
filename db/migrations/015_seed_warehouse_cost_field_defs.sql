@@ -1,0 +1,21 @@
+INSERT IGNORE INTO record_field_defs(record_type, field_key, sort_order)
+VALUES
+  ('warehouse_cost', '仓库名称', 1),
+  ('warehouse_cost', '客户', 2),
+  ('warehouse_cost', '单据类型', 3),
+  ('warehouse_cost', '单号', 4),
+  ('warehouse_cost', 'ERP单号', 5),
+  ('warehouse_cost', '运单号', 6),
+  ('warehouse_cost', '平台订单号', 7),
+  ('warehouse_cost', '计费时间', 8),
+  ('warehouse_cost', '流水号', 9),
+  ('warehouse_cost', '费用项', 10),
+  ('warehouse_cost', '计费策略', 11),
+  ('warehouse_cost', '货币', 12),
+  ('warehouse_cost', '计费金额', 13),
+  ('warehouse_cost', '核销节点', 14),
+  ('warehouse_cost', '核销状态', 15),
+  ('warehouse_cost', '出账状态', 16),
+  ('warehouse_cost', '关联账单', 17),
+  ('warehouse_cost', '账单状态', 18),
+  ('warehouse_cost', '货主', 19);

@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import type { RowDataPacket } from "mysql2";
 import { getSession } from "@/lib/auth/server";
@@ -8,138 +6,35 @@ import { getPool } from "@/lib/db/pool";
 
 export const runtime = "nodejs";
 
+const RECORD_TYPE = "inventory_turnover";
 const FALLBACK_FIELDS = ["运营人员", "店铺名称", "产品名称", "SKC", "SKU", "产品规格", "链接标签"];
 
-function normalizeHeaderCell(v: string) {
-  return v.replaceAll("\r", "").replaceAll("\n", "").replace(/\s+/g, " ").trim();
-}
-
-function parseCsvRecords(input: string, maxRecords: number) {
-  const records: string[][] = [];
-  let row: string[] = [];
-  let field = "";
-  let inQuotes = false;
-
-  const pushField = () => {
-    row.push(field);
-    field = "";
-  };
-  const pushRow = () => {
-    pushField();
-    records.push(row);
-    row = [];
-  };
-
-  for (let i = 0; i < input.length; i++) {
-    const ch = input[i];
-
-    if (ch === '"') {
-      if (inQuotes && input[i + 1] === '"') {
-        field += '"';
-        i++;
-        continue;
-      }
-      inQuotes = !inQuotes;
-      continue;
-    }
-
-    if (!inQuotes && ch === ",") {
-      pushField();
-      continue;
-    }
-
-    if (!inQuotes && (ch === "\n" || ch === "\r")) {
-      if (ch === "\r" && input[i + 1] === "\n") i++;
-      pushRow();
-      if (records.length >= maxRecords) break;
-      continue;
-    }
-
-    field += ch;
-  }
-
-  if (records.length < maxRecords && (field.length > 0 || row.length > 0)) {
-    pushRow();
-  }
-
-  return records;
-}
-
-function parseJsonCell(v: unknown) {
-  if (!v) return null;
-  if (typeof v === "object" && !(v instanceof Buffer)) return v;
-  if (typeof v === "string") {
-    try {
-      return JSON.parse(v) as unknown;
-    } catch {
-      return null;
-    }
-  }
-  if (v instanceof Buffer) {
-    try {
-      return JSON.parse(v.toString("utf8")) as unknown;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-async function getFieldsFromRecentRecords() {
+async function getFieldsFromRecordDefs() {
   const pool = getPool();
-  const [rows] = await pool.query<(RowDataPacket & { data: unknown })[]>(
-    "SELECT data FROM inventory_records ORDER BY id DESC LIMIT 50",
+  const [rows] = await pool.query<(RowDataPacket & { field_key: string })[]>(
+    `
+    SELECT field_key
+    FROM record_field_defs
+    WHERE record_type = ?
+    ORDER BY (sort_order IS NULL) ASC, sort_order ASC, field_key ASC
+  `,
+    [RECORD_TYPE],
   );
-  if (rows.length === 0) return [];
-
-  const out: string[] = [];
-  const seen = new Set<string>();
-
-  for (const r of rows) {
-    const raw = parseJsonCell(r.data);
-    const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
-    if (!obj) continue;
-    for (const k of Object.keys(obj)) {
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(k);
-    }
-  }
-
-  return out;
+  return rows.map((r) => r.field_key);
 }
 
-function resolveCsvPath() {
-  const filename = "明细-inventoryList-20260205025906661483.csv";
-  return [path.join(process.cwd(), "..", filename), path.join(process.cwd(), filename)];
-}
-
-async function getCsvHeaderFields() {
-  const candidates = resolveCsvPath();
-  let raw: string | null = null;
-  for (const p of candidates) {
-    try {
-      raw = await fs.readFile(p, "utf8");
-      break;
-    } catch {}
-  }
-  if (!raw) return [];
-
-  const records = parseCsvRecords(raw, 1);
-  const header = records[0] ?? [];
-  const out: string[] = [];
-  const seen = new Map<string, number>();
-
-  for (const cell of header) {
-    const name = normalizeHeaderCell(String(cell ?? ""));
-    if (!name) continue;
-    const c = (seen.get(name) ?? 0) + 1;
-    seen.set(name, c);
-    if (c === 1) out.push(name);
-    else out.push(`${name}（${c}）`);
-  }
-
-  return out;
+async function getFieldsFromRecordFields() {
+  const pool = getPool();
+  const [rows] = await pool.query<(RowDataPacket & { field_key: string })[]>(
+    `
+    SELECT field_key
+    FROM inventory_record_fields
+    GROUP BY field_key
+    ORDER BY field_key ASC
+    LIMIT 500
+  `,
+  );
+  return rows.map((r) => r.field_key);
 }
 
 export async function GET() {
@@ -147,10 +42,10 @@ export async function GET() {
   const session = await getSession();
   if (!session?.user?.id) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const fromCsv = await getCsvHeaderFields();
-  if (fromCsv.length > 0) return NextResponse.json({ fields: fromCsv });
+  const fromDefs = await getFieldsFromRecordDefs();
+  if (fromDefs.length > 0) return NextResponse.json({ fields: fromDefs });
 
-  const fromDb = await getFieldsFromRecentRecords();
-  const fields = fromDb.length > 0 ? fromDb : FALLBACK_FIELDS;
+  const fromFields = await getFieldsFromRecordFields();
+  const fields = fromFields.length > 0 ? fromFields : FALLBACK_FIELDS;
   return NextResponse.json({ fields });
 }

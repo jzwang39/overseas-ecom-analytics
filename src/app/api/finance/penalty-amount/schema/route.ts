@@ -1,11 +1,27 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getSession } from "@/lib/auth/server";
 import { ensureInitialSuperAdmin } from "@/lib/db/seed";
+import { getPool } from "@/lib/db/pool";
+
+const RECORD_TYPE = "penalty_amount";
+
+export const runtime = "nodejs";
+
+const TEMU_PENALTY_AMOUNT_FIELDS: string[] = [
+  "违规编号",
+  "订单编号",
+  "违规类型",
+  "支出金额",
+  "币种",
+  "账务时间",
+];
 
 function normalizeHeaderCell(v: string) {
-  return v.replaceAll("\r", "").replaceAll("\n", "").replace(/\s+/g, " ").trim();
+  const s = v.replaceAll("\r", "").replaceAll("\n", "").replace(/\s+/g, " ").trim();
+  return s.startsWith("\uFEFF") ? s.slice(1) : s;
 }
 
 function parseCsvRecords(input: string, maxRecords: number) {
@@ -92,11 +108,51 @@ async function getCsvHeaderFields() {
   return out;
 }
 
+async function getFieldsFromRecordDefs() {
+  const pool = getPool();
+  const [rows] = await pool.query<(RowDataPacket & { field_key: string })[]>(
+    `
+    SELECT field_key
+    FROM record_field_defs
+    WHERE record_type = ?
+    ORDER BY (sort_order IS NULL) ASC, sort_order ASC, field_key ASC
+  `,
+    [RECORD_TYPE],
+  );
+  return rows.map((r) => r.field_key);
+}
+
+async function saveFieldsToRecordDefs(fields: string[]) {
+  if (fields.length === 0) return;
+  const pool = getPool();
+  const placeholders = fields.map(() => "(?, ?, ?)").join(", ");
+  const params: unknown[] = [];
+  for (let i = 0; i < fields.length; i++) params.push(RECORD_TYPE, fields[i], i + 1);
+  try {
+    await pool.query<ResultSetHeader>(
+      `
+      INSERT IGNORE INTO record_field_defs(record_type, field_key, sort_order)
+      VALUES ${placeholders}
+    `,
+      params,
+    );
+  } catch {}
+}
+
 export async function GET() {
   await ensureInitialSuperAdmin();
   const session = await getSession();
   if (!session?.user?.id) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const fields = await getCsvHeaderFields();
-  return NextResponse.json({ fields });
+  const fromDefs = await getFieldsFromRecordDefs();
+  if (fromDefs.length > 0) return NextResponse.json({ fields: fromDefs });
+
+  const fromCsv = await getCsvHeaderFields();
+  if (fromCsv.length > 0) {
+    await saveFieldsToRecordDefs(fromCsv);
+    return NextResponse.json({ fields: fromCsv });
+  }
+
+  await saveFieldsToRecordDefs(TEMU_PENALTY_AMOUNT_FIELDS);
+  return NextResponse.json({ fields: TEMU_PENALTY_AMOUNT_FIELDS });
 }

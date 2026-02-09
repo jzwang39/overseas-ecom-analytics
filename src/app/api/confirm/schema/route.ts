@@ -1,17 +1,19 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import type { RowDataPacket } from "mysql2";
+import type { ResultSetHeader, RowDataPacket } from "mysql2";
 import { getSession } from "@/lib/auth/server";
-import { ensureInitialSuperAdmin } from "@/lib/db/seed";
 import { getPool } from "@/lib/db/pool";
+import { ensureInitialSuperAdmin } from "@/lib/db/seed";
+import { SKYNEST_PURCHASE_FIELDS_2025 } from "@/lib/workspace/schemas";
 
 export const runtime = "nodejs";
 
-const FALLBACK_FIELDS = ["运营人员", "店铺名称", "产品名称", "SKC", "SKU", "产品规格", "链接标签"];
+const RECORD_TYPE = "purchase";
 
 function normalizeHeaderCell(v: string) {
-  return v.replaceAll("\r", "").replaceAll("\n", "").replace(/\s+/g, " ").trim();
+  const s = v.replaceAll("\r", "").replaceAll("\n", "").replace(/\s+/g, " ").trim();
+  return s.startsWith("\uFEFF") ? s.slice(1) : s;
 }
 
 function parseCsvRecords(input: string, maxRecords: number) {
@@ -65,56 +67,9 @@ function parseCsvRecords(input: string, maxRecords: number) {
   return records;
 }
 
-function parseJsonCell(v: unknown) {
-  if (!v) return null;
-  if (typeof v === "object" && !(v instanceof Buffer)) return v;
-  if (typeof v === "string") {
-    try {
-      return JSON.parse(v) as unknown;
-    } catch {
-      return null;
-    }
-  }
-  if (v instanceof Buffer) {
-    try {
-      return JSON.parse(v.toString("utf8")) as unknown;
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
-
-async function getFieldsFromRecentRecords() {
-  const pool = getPool();
-  const [rows] = await pool.query<(RowDataPacket & { data: unknown })[]>(
-    "SELECT data FROM purchase_records ORDER BY id DESC LIMIT 50",
-  );
-  if (rows.length === 0) return [];
-
-  const out: string[] = [];
-  const seen = new Set<string>();
-
-  for (const r of rows) {
-    const raw = parseJsonCell(r.data);
-    const obj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
-    if (!obj) continue;
-    for (const k of Object.keys(obj)) {
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(k);
-    }
-  }
-
-  return out;
-}
-
 function resolveCsvPath() {
-  const candidates = [
-    path.join(process.cwd(), "..", "SkyNest订货明细2025.csv"),
-    path.join(process.cwd(), "SkyNest订货明细2025.csv"),
-  ];
-  return candidates;
+  const filename = "SkyNest订货明细2025.csv";
+  return [path.join(process.cwd(), "..", filename), path.join(process.cwd(), filename)];
 }
 
 async function getCsvHeaderFields() {
@@ -156,15 +111,55 @@ async function getCsvHeaderFields() {
   return out;
 }
 
+async function getFieldsFromRecordDefs() {
+  const pool = getPool();
+  try {
+    const [rows] = await pool.query<(RowDataPacket & { field_key: string })[]>(
+      `
+      SELECT field_key
+      FROM record_field_defs
+      WHERE record_type = ?
+      ORDER BY (sort_order IS NULL) ASC, sort_order ASC, field_key ASC
+    `,
+      [RECORD_TYPE],
+    );
+    return rows.map((r) => r.field_key);
+  } catch {
+    return [];
+  }
+}
+
+async function saveFieldsToRecordDefs(fields: string[]) {
+  if (fields.length === 0) return;
+  const pool = getPool();
+  const placeholders = fields.map(() => "(?, ?, ?)").join(", ");
+  const params: unknown[] = [];
+  for (let i = 0; i < fields.length; i++) params.push(RECORD_TYPE, fields[i], i + 1);
+  try {
+    await pool.query<ResultSetHeader>(
+      `
+      INSERT IGNORE INTO record_field_defs(record_type, field_key, sort_order)
+      VALUES ${placeholders}
+    `,
+      params,
+    );
+  } catch {}
+}
+
 export async function GET() {
   await ensureInitialSuperAdmin();
   const session = await getSession();
   if (!session?.user?.id) return NextResponse.json({ error: "未登录" }, { status: 401 });
 
-  const fromCsv = await getCsvHeaderFields();
-  if (fromCsv.length > 0) return NextResponse.json({ fields: fromCsv });
+  const fromDefs = await getFieldsFromRecordDefs();
+  if (fromDefs.length > 0) return NextResponse.json({ fields: fromDefs });
 
-  const fromDb = await getFieldsFromRecentRecords();
-  const fields = fromDb.length > 0 ? fromDb : FALLBACK_FIELDS;
+  const fromCsv = await getCsvHeaderFields();
+  if (fromCsv.length > 0) {
+    await saveFieldsToRecordDefs(fromCsv);
+    return NextResponse.json({ fields: fromCsv });
+  }
+  await saveFieldsToRecordDefs(SKYNEST_PURCHASE_FIELDS_2025);
+  const fields = SKYNEST_PURCHASE_FIELDS_2025;
   return NextResponse.json({ fields });
 }

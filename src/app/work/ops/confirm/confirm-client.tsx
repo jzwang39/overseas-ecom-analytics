@@ -43,6 +43,7 @@ export function ConfirmClient({
     [],
   );
   const [fields, setFields] = useState<string[] | null>(null);
+  const [schemaError, setSchemaError] = useState<string | null>(null);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [batchLoading, setBatchLoading] = useState(false);
@@ -68,11 +69,24 @@ export function ConfirmClient({
   }, [fields, showAllFilters]);
 
   const loadSchema = useCallback(async () => {
-    const res = await fetch(schemaUrl);
-    if (!res.ok) return;
-    const json = (await res.json().catch(() => null)) as { fields?: unknown } | null;
-    const f = Array.isArray(json?.fields) ? json!.fields.filter((v) => typeof v === "string") : null;
-    setFields(f);
+    try {
+      setSchemaError(null);
+      const res = await fetch(schemaUrl);
+      const json = (await res.json().catch(() => null)) as { fields?: unknown; error?: unknown } | null;
+      if (!res.ok) {
+        const msg = typeof json?.error === "string" ? json.error : `HTTP ${res.status}`;
+        setSchemaError(`读取字段失败：${msg}`);
+        return;
+      }
+      const f = Array.isArray(json?.fields) ? json!.fields.filter((v) => typeof v === "string") : null;
+      if (!f) {
+        setSchemaError("读取字段失败：接口返回格式错误");
+        return;
+      }
+      setFields(f);
+    } catch (err) {
+      setSchemaError(`读取字段失败：${err instanceof Error ? err.message : "未知错误"}`);
+    }
   }, [schemaUrl]);
 
   const load = useCallback(async () => {
@@ -384,7 +398,22 @@ export function ConfirmClient({
                 </table>
               </div>
             ) : (
-              <div className="px-3 py-6 text-sm text-muted">读取 CSV 字段中…</div>
+              <div className="px-3 py-6 text-sm text-muted">
+                {schemaError ? (
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="min-w-0 flex-1">{schemaError}</div>
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                      onClick={loadSchema}
+                    >
+                      重试
+                    </button>
+                  </div>
+                ) : (
+                  "读取字段中…"
+                )}
+              </div>
             )}
           </div>
         </div>
