@@ -65,7 +65,7 @@ export function LogsClient() {
             type="button"
             onClick={load}
             disabled={loading}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium hover:bg-primary-2 disabled:opacity-50"
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
           >
             {loading ? "查询中…" : "查询"}
           </button>

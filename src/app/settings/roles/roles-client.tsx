@@ -65,22 +65,37 @@ export function RolesClient() {
   }
 
   async function createRole() {
-    const res = await fetch("/api/admin/roles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name: form.name,
-        description: form.description || undefined,
-        menuKeys: Array.from(form.menuKeys),
-      }),
-    });
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      alert(json.error ?? "创建失败");
+    const name = form.name.trim();
+    if (!name) {
+      alert("请填写角色名称");
       return;
     }
-    setForm({ name: "", description: "", menuKeys: new Set() });
-    await load();
+    if (form.menuKeys.size === 0) {
+      alert("请至少选择一个菜单");
+      return;
+    }
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          description: form.description.trim() || undefined,
+          menuKeys: Array.from(form.menuKeys),
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        alert(json.error ?? "创建失败");
+        return;
+      }
+      setForm({ name: "", description: "", menuKeys: new Set() });
+      await load();
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function patchRole(id: number, body: unknown) {
@@ -125,8 +140,8 @@ export function RolesClient() {
           />
           <button
             type="button"
-            disabled={!form.name || form.menuKeys.size === 0}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium hover:bg-primary-2 disabled:opacity-50"
+            disabled={loading}
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
             onClick={createRole}
           >
             创建
@@ -150,7 +165,7 @@ export function RolesClient() {
                     className={[
                       "inline-flex h-8 w-8 items-center justify-center rounded-lg border",
                       form.menuKeys.has(it.key)
-                        ? "border-border bg-primary text-foreground"
+                          ? "border-primary bg-surface text-primary"
                         : "border-border bg-surface hover:bg-surface-2 text-muted",
                     ].join(" ")}
                     title={form.menuKeys.has(it.key) ? "已选" : "未选"}
@@ -238,4 +253,3 @@ export function RolesClient() {
     </div>
   );
 }
-

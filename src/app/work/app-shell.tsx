@@ -287,7 +287,7 @@ export function AppShell({
     >
       <div className="flex h-12 items-center justify-between gap-2 px-3">
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-foreground">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-primary bg-surface text-primary">
             <Icon name="grid" className="h-4 w-4" />
           </div>
           {collapsed ? null : <div className="text-sm font-semibold">工作台</div>}

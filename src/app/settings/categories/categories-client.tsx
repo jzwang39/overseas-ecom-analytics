@@ -65,18 +65,27 @@ export function CategoriesClient() {
 
   async function create() {
     const trimmed = name.trim();
-    if (!trimmed) return;
-    const res = await fetch("/api/admin/categories", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: trimmed }),
-    });
-    if (!res.ok) {
-      alert(await readApiError(res));
+    if (!trimmed) {
+      alert("请填写类目名称");
       return;
     }
-    setName("");
-    await load();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!res.ok) {
+        alert(await readApiError(res));
+        return;
+      }
+      setName("");
+      await load();
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function patch(id: number, body: unknown) {
@@ -114,8 +123,8 @@ export function CategoriesClient() {
           />
           <button
             type="button"
-            disabled={!name.trim()}
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-4 text-sm font-medium hover:bg-primary-2 disabled:opacity-50"
+            disabled={loading}
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
             onClick={create}
           >
             创建
@@ -174,7 +183,7 @@ export function CategoriesClient() {
                     <>
                       <button
                         type="button"
-                        className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium hover:bg-primary-2 disabled:opacity-50"
+                        className="inline-flex h-8 items-center justify-center rounded-lg border border-primary bg-surface px-3 text-xs font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
                         disabled={!editingName.trim()}
                         onClick={async () => {
                           const next = editingName.trim();
