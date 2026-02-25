@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getWorkspaceSchema } from "@/lib/workspace/schemas";
 import { useSession } from "next-auth/react";
 
@@ -150,6 +150,25 @@ const PURCHASE_TABLE_HIDDEN_FIELDS = new Set([
   "询价分配人｜选品",
   "询价负责人",
   "主要工艺",
+]);
+const INQUIRY_TABLE_HIDDEN_FIELDS = new Set([
+  "平台在售价格（Min）",
+  "平台在售价格（Max）",
+  "资质要求",
+  "是否有专利风险",
+  "选品人",
+  "询价分配人｜选品",
+  "询价负责人",
+  "询价人",
+  "产品尺寸-长（厘米）",
+  "产品尺寸-宽（厘米）",
+  "产品尺寸-高（厘米）",
+  "包装尺寸-长（英寸）",
+  "包装尺寸-宽（英寸）",
+  "包装尺寸-高（英寸）",
+  "产品体积",
+  "产品重量",
+  "产品实物图",
 ]);
 
 const INQUIRY_UI_HIDDEN_FIELDS = new Set([
@@ -700,6 +719,48 @@ export function WorkspaceClient({
     factoryPhone: "",
   });
   const [inquiryActionLoading, setInquiryActionLoading] = useState<null | "save" | "submit">(null);
+  const [inquiryEditingId, setInquiryEditingId] = useState<number | null>(null);
+  const [inquiryEditingStatus, setInquiryEditingStatus] = useState("");
+  const [inquiryAssignOpen, setInquiryAssignOpen] = useState(false);
+  const [inquiryAssignUnits, setInquiryAssignUnits] = useState<"cmkg" | "inlb">("cmkg");
+  const [inquiryAssignRecordId, setInquiryAssignRecordId] = useState<number | null>(null);
+  const [inquiryAssignForm, setInquiryAssignForm] = useState<{
+    productName: string;
+    category: string;
+    productUnitPrice: string;
+    moq: string;
+    discountPolicy: "" | "有" | "无";
+    discountNote: string;
+    packageLengthCm: string;
+    packageWidthCm: string;
+    packageHeightCm: string;
+    packageWeightKg: string;
+    mainProcess: string;
+    factoryLocation: string;
+    factoryContact: string;
+    factoryPhone: string;
+  }>({
+    productName: "",
+    category: "",
+    productUnitPrice: "",
+    moq: "",
+    discountPolicy: "",
+    discountNote: "",
+    packageLengthCm: "",
+    packageWidthCm: "",
+    packageHeightCm: "",
+    packageWeightKg: "",
+    mainProcess: "",
+    factoryLocation: "",
+    factoryContact: "",
+    factoryPhone: "",
+  });
+  const [inquiryAssignPerson, setInquiryAssignPerson] = useState("");
+  const [inquiryAssigneeOptions, setInquiryAssigneeOptions] = useState<{ username: string; displayName: string }[]>(
+    [],
+  );
+  const [inquiryAssigneeLoading, setInquiryAssigneeLoading] = useState(false);
+  const [inquiryAssignSaving, setInquiryAssignSaving] = useState(false);
 
   const operatorName = useMemo(() => {
     const name = session?.user?.name;
@@ -729,6 +790,31 @@ export function WorkspaceClient({
       factoryPhone: "",
     });
     setInquiryActionLoading(null);
+    setInquiryEditingId(null);
+    setInquiryEditingStatus("");
+    setInquiryAssignOpen(false);
+    setInquiryAssignUnits("cmkg");
+    setInquiryAssignRecordId(null);
+    setInquiryAssignForm({
+      productName: "",
+      category: "",
+      productUnitPrice: "",
+      moq: "",
+      discountPolicy: "",
+      discountNote: "",
+      packageLengthCm: "",
+      packageWidthCm: "",
+      packageHeightCm: "",
+      packageWeightKg: "",
+      mainProcess: "",
+      factoryLocation: "",
+      factoryContact: "",
+      factoryPhone: "",
+    });
+    setInquiryAssignPerson("");
+    setInquiryAssigneeOptions([]);
+    setInquiryAssigneeLoading(false);
+    setInquiryAssignSaving(false);
     setUploadingField(null);
     setImageIndexByField({});
     setLinkDraftByField({});
@@ -791,6 +877,9 @@ export function WorkspaceClient({
     if (!schema) return [];
     if (workspaceKey === "ops.purchase") {
       return visibleFields.filter((f) => !WORKSPACE_TABLE_HIDDEN_FIELDS.has(f) && !PURCHASE_TABLE_HIDDEN_FIELDS.has(f));
+    }
+    if (workspaceKey === "ops.inquiry") {
+      return visibleFields.filter((f) => !WORKSPACE_TABLE_HIDDEN_FIELDS.has(f) && !INQUIRY_TABLE_HIDDEN_FIELDS.has(f));
     }
     return visibleFields.filter((f) => !WORKSPACE_TABLE_HIDDEN_FIELDS.has(f));
   }, [schema, visibleFields, workspaceKey]);
@@ -865,6 +954,8 @@ export function WorkspaceClient({
   function openInquiryCreate() {
     setEditing(null);
     setInquiryUnits("cmkg");
+    setInquiryEditingId(null);
+    setInquiryEditingStatus("");
     setInquiryForm({
       productName: (filters["名称"] ?? "").trim(),
       category: "",
@@ -894,6 +985,9 @@ export function WorkspaceClient({
       const moq = inquiryForm.moq.trim();
       const discountPolicy = inquiryForm.discountPolicy.trim();
       const discountNote = inquiryForm.discountNote.trim();
+      const resolvedStatus =
+        inquiryEditingId != null && action === "save" ? inquiryEditingStatus.trim() || status : status;
+
       const data: Record<string, unknown> = {
         名称: inquiryForm.productName,
         "包裹尺寸-长（厘米）": inquiryForm.packageLengthCm,
@@ -904,7 +998,7 @@ export function WorkspaceClient({
         工厂所在地: inquiryForm.factoryLocation,
         工厂联系人: inquiryForm.factoryContact,
         联系人电话: inquiryForm.factoryPhone,
-        状态: status,
+        状态: resolvedStatus,
       };
       if (category) data["所属类目"] = category;
       if (unitPrice) data["产品单价"] = unitPrice;
@@ -913,8 +1007,10 @@ export function WorkspaceClient({
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
       if (operatorName) data["运营人员"] = operatorName;
 
-      const res = await fetch(`/api/workspace/${encodeURIComponent("ops.purchase")}/records`, {
-        method: "POST",
+      const endpointBase = `/api/workspace/${encodeURIComponent("ops.purchase")}/records`;
+      const url = inquiryEditingId != null ? `${endpointBase}/${inquiryEditingId}` : endpointBase;
+      const res = await fetch(url, {
+        method: inquiryEditingId != null ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data }),
       });
@@ -926,13 +1022,146 @@ export function WorkspaceClient({
         return;
       }
       setInquiryCreateOpen(false);
+      setInquiryEditingId(null);
+      setInquiryEditingStatus("");
       await load();
     } finally {
       setInquiryActionLoading(null);
     }
   }
 
+  const isAdmin = session?.user?.permissionLevel != null && session.user.permissionLevel !== "user";
+  const currentUsername = typeof session?.user?.username === "string" ? session.user.username : "";
+
+  function canSeeInquiryAssign(row: RecordRow) {
+    if (workspaceKey !== "ops.inquiry") return false;
+    if (isAdmin) return true;
+    const obj = toRecordStringUnknown(row.data);
+    const owner = String(obj["询价负责人"] ?? "").trim();
+    if (!owner) return false;
+    if (currentUsername && owner === currentUsername) return true;
+    if (operatorName && owner === operatorName) return true;
+    return false;
+  }
+
+  async function ensureInquiryAssigneesLoaded() {
+    if (inquiryAssigneeLoading) return;
+    if (inquiryAssigneeOptions.length > 0) return;
+    setInquiryAssigneeLoading(true);
+    try {
+      const res = await fetch("/api/ops/inquiry/assign", { cache: "no-store" });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "加载询价人失败");
+        return;
+      }
+      const raw = json && typeof json === "object" && "users" in json ? (json as { users?: unknown }).users : null;
+      if (!Array.isArray(raw)) {
+        setInquiryAssigneeOptions([]);
+        return;
+      }
+      const list: { username: string; displayName: string }[] = [];
+      for (const it of raw) {
+        const u = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+        const username = u && typeof u.username === "string" ? u.username : "";
+        const displayName = u && typeof u.displayName === "string" ? u.displayName : "";
+        if (!username) continue;
+        list.push({ username, displayName: displayName || username });
+      }
+      setInquiryAssigneeOptions(list);
+    } finally {
+      setInquiryAssigneeLoading(false);
+    }
+  }
+
+  function openInquiryAssign(row: RecordRow) {
+    if (workspaceKey !== "ops.inquiry") return;
+    const obj = toRecordStringUnknown(row.data);
+    setEditing(null);
+    setInquiryCreateOpen(false);
+    setInquiryAssignUnits("cmkg");
+    setInquiryAssignRecordId(row.id);
+    setInquiryAssignForm({
+      productName: String(obj["名称"] ?? ""),
+      category: String(obj["所属类目"] ?? ""),
+      productUnitPrice: String(obj["产品单价"] ?? ""),
+      moq: String(obj["起订量"] ?? ""),
+      discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
+      discountNote: String(obj["优惠政策备注"] ?? ""),
+      packageLengthCm: String(obj["包裹尺寸-长（厘米）"] ?? ""),
+      packageWidthCm: String(obj["包裹尺寸-宽（厘米）"] ?? ""),
+      packageHeightCm: String(obj["包裹尺寸-高（厘米）"] ?? ""),
+      packageWeightKg: String(obj["包裹实重（公斤）"] ?? ""),
+      mainProcess: String(obj["主要工艺"] ?? ""),
+      factoryLocation: String(obj["工厂所在地"] ?? ""),
+      factoryContact: String(obj["工厂联系人"] ?? ""),
+      factoryPhone: String(obj["联系人电话"] ?? ""),
+    });
+    setInquiryAssignPerson(String(obj["询价人"] ?? ""));
+    setInquiryAssignSaving(false);
+    setInquiryAssignOpen(true);
+    void ensureInquiryAssigneesLoaded();
+  }
+
+  async function saveInquiryAssign() {
+    if (inquiryAssignSaving) return;
+    if (!inquiryAssignRecordId) return;
+    const assignee = inquiryAssignPerson.trim();
+    if (!assignee) {
+      alert("请选择询价人");
+      return;
+    }
+    setInquiryAssignSaving(true);
+    try {
+      const res = await fetch("/api/ops/inquiry/assign", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordId: inquiryAssignRecordId, assigneeUsername: assignee }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "分配失败");
+        return;
+      }
+      setInquiryAssignOpen(false);
+      setInquiryAssignRecordId(null);
+      await load();
+    } finally {
+      setInquiryAssignSaving(false);
+    }
+  }
+
   function openEdit(row: RecordRow) {
+    if (workspaceKey === "ops.inquiry") {
+      const obj = toRecordStringUnknown(row.data);
+      setEditing(null);
+      setInquiryUnits("cmkg");
+      setInquiryEditingId(row.id);
+      setInquiryEditingStatus(String(obj["状态"] ?? ""));
+      setInquiryForm({
+        productName: String(obj["名称"] ?? ""),
+        category: String(obj["所属类目"] ?? ""),
+        productUnitPrice: String(obj["产品单价"] ?? ""),
+        moq: String(obj["起订量"] ?? ""),
+        discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
+        discountNote: String(obj["优惠政策备注"] ?? ""),
+        packageLengthCm: String(obj["包裹尺寸-长（厘米）"] ?? ""),
+        packageWidthCm: String(obj["包裹尺寸-宽（厘米）"] ?? ""),
+        packageHeightCm: String(obj["包裹尺寸-高（厘米）"] ?? ""),
+        packageWeightKg: String(obj["包裹实重（公斤）"] ?? ""),
+        mainProcess: String(obj["主要工艺"] ?? ""),
+        factoryLocation: String(obj["工厂所在地"] ?? ""),
+        factoryContact: String(obj["工厂联系人"] ?? ""),
+        factoryPhone: String(obj["联系人电话"] ?? ""),
+      });
+      setInquiryActionLoading(null);
+      setInquiryCreateOpen(true);
+      return;
+    }
     if (!schema) {
       setEditing({
         id: row.id,
@@ -1127,9 +1356,56 @@ export function WorkspaceClient({
     if (workspaceKey === "ops.purchase") {
       for (const f of PURCHASE_PRODUCT_SIZE_FIELDS) excluded.add(f);
     }
+    if (workspaceKey === "ops.inquiry") {
+      excluded.add("选品逻辑");
+    }
     const list = visibleFields.slice(0, 12);
     return list.filter((f) => !excluded.has(f));
   }, [schema, visibleFields, workspaceKey]);
+
+  type EditModalShellProps = {
+    title: ReactNode;
+    dataEditModal: string;
+    onClose: () => void;
+    children: ReactNode;
+  };
+
+  function EditModalShell({ title, dataEditModal, onClose, children }: EditModalShellProps) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-edit-modal={dataEditModal}>
+        <div className="w-full max-w-4xl rounded-xl border border-border bg-surface p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-medium">{title}</div>
+            <button
+              type="button"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+              title="关闭"
+              onClick={onClose}
+            >
+              ✕
+            </button>
+          </div>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  function InquiryEditModal({ title, body }: { title: string; body: ReactNode }) {
+    return (
+      <EditModalShell title={title} dataEditModal="inquiry" onClose={() => setEditing(null)}>
+        {body}
+      </EditModalShell>
+    );
+  }
+
+  function DefaultEditModal({ title, dataEditModal, body }: { title: string; dataEditModal: string; body: ReactNode }) {
+    return (
+      <EditModalShell title={title} dataEditModal={dataEditModal} onClose={() => setEditing(null)}>
+        {body}
+      </EditModalShell>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -1176,25 +1452,71 @@ export function WorkspaceClient({
             <div className="flex flex-col gap-3">
               <div className="grid gap-3 sm:grid-cols-3">
                 {filterFields.map((f) => (
-                  <input
-                    key={f}
-                    value={filters[f] ?? ""}
-                    onChange={(e) => setFilters((prev) => ({ ...prev, [f]: e.target.value }))}
-                    placeholder={displayFieldLabel(f)}
-                    className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
-                  />
+                  workspaceKey === "ops.inquiry" && (f === "名称" || f === "所属类目") ? (
+                    <div key={f} className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">{displayFieldLabel(f)}</div>
+                      <input
+                        value={filters[f] ?? ""}
+                        onChange={(e) => setFilters((prev) => ({ ...prev, [f]: e.target.value }))}
+                        placeholder={displayFieldLabel(f)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                  ) : (
+                    <input
+                      key={f}
+                      value={filters[f] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, [f]: e.target.value }))}
+                      placeholder={displayFieldLabel(f)}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    />
+                  )
                 ))}
+                {workspaceKey === "ops.inquiry" ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">状态</div>
+                    <select
+                      value={filters["状态"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 状态: e.target.value }))}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value={INQUIRY_STATUS_VALUE}>{INQUIRY_STATUS_VALUE}</option>
+                      <option value="待询价">待询价</option>
+                      <option value="待确品">待确品</option>
+                      <option value="待分配【采购】">待分配【采购】</option>
+                      <option value="待采购">待采购</option>
+                      <option value="已到仓">已到仓</option>
+                    </select>
+                  </div>
+                ) : null}
                 {workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry" ? (
-                  <select
-                    value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
-                    className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
-                  >
-                    <option value="">请选择</option>
-                    <option value="today">今天</option>
-                    <option value="7d">7日内</option>
-                    <option value="30d">30天内</option>
-                  </select>
+                  workspaceKey === "ops.inquiry" ? (
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">时间范围</div>
+                      <select
+                        value={timeRange}
+                        onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      >
+                        <option value="">请选择</option>
+                        <option value="today">今天</option>
+                        <option value="7d">7日内</option>
+                        <option value="30d">30天内</option>
+                      </select>
+                    </div>
+                  ) : (
+                    <select
+                      value={timeRange}
+                      onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value="today">今天</option>
+                      <option value="7d">7日内</option>
+                      <option value="30d">30天内</option>
+                    </select>
+                  )
                 ) : null}
               </div>
               <div className="flex items-center justify-end gap-3">
@@ -1315,13 +1637,24 @@ export function WorkspaceClient({
                               );
                             })}
                             <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right">
-                              <button
-                                type="button"
-                                className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
-                                onClick={() => openEdit(row)}
-                              >
-                                修改
-                              </button>
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                  onClick={() => openEdit(row)}
+                                >
+                                  修改
+                                </button>
+                                {canSeeInquiryAssign(row) ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                    onClick={() => openInquiryAssign(row)}
+                                  >
+                                    分配
+                                  </button>
+                                ) : null}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1356,6 +1689,16 @@ export function WorkspaceClient({
                           >
                             ✎
                           </button>
+                          {canSeeInquiryAssign(row) ? (
+                            <button
+                              type="button"
+                              className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                              title="分配"
+                              onClick={() => openInquiryAssign(row)}
+                            >
+                              分
+                            </button>
+                          ) : null}
                         </div>
                       </div>
                     ))
@@ -1371,12 +1714,18 @@ export function WorkspaceClient({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-3xl rounded-xl border border-border bg-surface p-4">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">新增询价数据</div>
+              <div className="text-sm font-medium">
+                {inquiryEditingId != null ? `修改询价数据（ID: ${inquiryEditingId}）` : "新增询价数据"}
+              </div>
               <button
                 type="button"
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
                 title="关闭"
-                onClick={() => setInquiryCreateOpen(false)}
+                onClick={() => {
+                  setInquiryCreateOpen(false);
+                  setInquiryEditingId(null);
+                  setInquiryEditingStatus("");
+                }}
               >
                 ✕
               </button>
@@ -1391,23 +1740,24 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">商品名称</div>
                       <input
                         value={inquiryForm.productName}
-                        disabled
-                        className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, productName: e.target.value }))}
+                        className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
                       <div className="text-xs text-muted">所属类目</div>
-                      <select
+                      <input
+                        list="inquiry-category-options"
                         value={inquiryForm.category}
                         onChange={(e) => setInquiryForm((prev) => ({ ...prev, category: e.target.value }))}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                      >
-                        <option value="">请选择</option>
-                        <option value="产品名称">1. 产品名称</option>
-                        <option value="品类">2. 品类</option>
-                        <option value="状态">3. 状态</option>
-                        <option value="选品逻辑">4. 选品逻辑</option>
-                      </select>
+                        placeholder="请选择或输入"
+                      />
+                      <datalist id="inquiry-category-options">
+                        {categories.map((name) => (
+                          <option key={name} value={name} />
+                        ))}
+                      </datalist>
                     </div>
                   </div>
                 </div>
@@ -1645,7 +1995,11 @@ export function WorkspaceClient({
               <button
                 type="button"
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
-                onClick={() => setInquiryCreateOpen(false)}
+                onClick={() => {
+                  setInquiryCreateOpen(false);
+                  setInquiryEditingId(null);
+                  setInquiryEditingStatus("");
+                }}
                 disabled={inquiryActionLoading != null}
               >
                 取消
@@ -1671,38 +2025,268 @@ export function WorkspaceClient({
         </div>
       ) : null}
 
-      {editing ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          data-edit-modal={
-            workspaceKey === "ops.inquiry" ? "inquiry" : workspaceKey === "ops.purchase" ? "purchase" : "default"
-          }
+      {inquiryAssignOpen ? (
+        <EditModalShell
+          title={inquiryAssignRecordId != null ? `询价分配（ID: ${inquiryAssignRecordId}）` : "询价分配"}
+          dataEditModal="inquiry-assign"
+          onClose={() => {
+            setInquiryAssignOpen(false);
+            setInquiryAssignRecordId(null);
+            setInquiryAssignPerson("");
+          }}
         >
-          <div className="w-full max-w-4xl rounded-xl border border-border bg-surface p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-medium">
-                {workspaceKey === "ops.inquiry"
-                  ? editing.id
-                    ? `询价修改（ID: ${editing.id}）`
-                    : "新增询价"
-                  : workspaceKey === "ops.purchase"
-                    ? editing.id
-                      ? `选品修改（ID: ${editing.id}）`
-                      : "新增选品"
-                    : editing.id
-                      ? `修改（ID: ${editing.id}）`
-                      : "新增"}
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-3">
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">基本信息</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={inquiryAssignForm.productName}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <input
+                      value={inquiryAssignForm.category}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <div className="text-xs text-muted">询价人</div>
+                    <select
+                      value={inquiryAssignPerson}
+                      onChange={(e) => setInquiryAssignPerson(e.target.value)}
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      disabled={inquiryAssigneeLoading}
+                    >
+                      <option value="">请选择</option>
+                      {inquiryAssigneeOptions.map((u) => (
+                        <option key={u.username} value={u.username}>
+                          {u.displayName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
-              <button
-                type="button"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                title="关闭"
-                onClick={() => setEditing(null)}
-              >
-                ✕
-              </button>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium">包裹参数</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={[
+                        "inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs",
+                        inquiryAssignUnits === "cmkg"
+                          ? "border-primary bg-surface text-primary"
+                          : "border-border bg-surface hover:bg-surface-2 text-muted",
+                      ].join(" ")}
+                      onClick={() => setInquiryAssignUnits("cmkg")}
+                    >
+                      cm/kg
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        "inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs",
+                        inquiryAssignUnits === "inlb"
+                          ? "border-primary bg-surface text-primary"
+                          : "border-border bg-surface hover:bg-surface-2 text-muted",
+                      ].join(" ")}
+                      onClick={() => setInquiryAssignUnits("inlb")}
+                    >
+                      英寸/英镑
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-3">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">包裹尺寸（长 / 宽 / 高，{inquiryAssignUnits === "cmkg" ? "cm" : "in"}）</div>
+                    <div className="flex gap-2">
+                      <input
+                        inputMode="decimal"
+                        value={
+                          inquiryAssignUnits === "cmkg"
+                            ? inquiryAssignForm.packageLengthCm
+                            : (cmToInchesValue(inquiryAssignForm.packageLengthCm) ?? "")
+                        }
+                        disabled
+                        placeholder="长"
+                        className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                      />
+                      <input
+                        inputMode="decimal"
+                        value={
+                          inquiryAssignUnits === "cmkg"
+                            ? inquiryAssignForm.packageWidthCm
+                            : (cmToInchesValue(inquiryAssignForm.packageWidthCm) ?? "")
+                        }
+                        disabled
+                        placeholder="宽"
+                        className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                      />
+                      <input
+                        inputMode="decimal"
+                        value={
+                          inquiryAssignUnits === "cmkg"
+                            ? inquiryAssignForm.packageHeightCm
+                            : (cmToInchesValue(inquiryAssignForm.packageHeightCm) ?? "")
+                        }
+                        disabled
+                        placeholder="高"
+                        className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">包裹重量（{inquiryAssignUnits === "cmkg" ? "kg" : "lb"}）</div>
+                    <input
+                      inputMode="decimal"
+                      value={
+                        inquiryAssignUnits === "cmkg"
+                          ? inquiryAssignForm.packageWeightKg
+                          : (kgToLbValue(inquiryAssignForm.packageWeightKg) ?? "")
+                      }
+                      disabled
+                      placeholder="请输入重量"
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">商务信息</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">产品单价</div>
+                    <input
+                      inputMode="decimal"
+                      value={inquiryAssignForm.productUnitPrice}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">起订量</div>
+                    <input
+                      inputMode="numeric"
+                      value={inquiryAssignForm.moq}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">优惠政策</div>
+                    <select
+                      value={inquiryAssignForm.discountPolicy}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    >
+                      <option value="">请选择</option>
+                      <option value="有">有</option>
+                      <option value="无">无</option>
+                    </select>
+                  </div>
+                  {inquiryAssignForm.discountPolicy === "有" ? (
+                    <div className="flex flex-col gap-1 sm:col-span-2">
+                      <div className="text-xs text-muted">优惠备注</div>
+                      <textarea
+                        value={inquiryAssignForm.discountNote}
+                        disabled
+                        rows={3}
+                        className="w-full cursor-not-allowed resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none opacity-70"
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">工厂信息</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">主要工艺</div>
+                    <select
+                      value={inquiryAssignForm.mainProcess}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    >
+                      <option value="">请选择</option>
+                      {MAIN_PROCESS_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">工厂所在地</div>
+                    <input
+                      value={inquiryAssignForm.factoryLocation}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">联系人</div>
+                    <input
+                      value={inquiryAssignForm.factoryContact}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">联系人电话</div>
+                    <input
+                      value={inquiryAssignForm.factoryPhone}
+                      disabled
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
-            {schema ? (
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setInquiryAssignOpen(false);
+                setInquiryAssignRecordId(null);
+                setInquiryAssignPerson("");
+              }}
+              disabled={inquiryAssignSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
+              onClick={saveInquiryAssign}
+              disabled={inquiryAssignSaving || inquiryAssigneeLoading}
+            >
+              {inquiryAssignSaving ? "提交中…" : "确认分配"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
+      {editing ? (
+        (() => {
+          const body = (
+            <>
+              {schema ? (
               <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-3">
                 {(() => {
                   const fields = visibleFields.filter(
@@ -2556,8 +3140,26 @@ export function WorkspaceClient({
                 保存
               </button>
             </div>
-          </div>
-        </div>
+            </>
+          );
+
+          if (workspaceKey === "ops.inquiry") {
+            const title = editing.id ? `询价修改（ID: ${editing.id}）` : "新增询价";
+            return <InquiryEditModal title={title} body={body} />;
+          }
+
+          const dataEditModal = workspaceKey === "ops.purchase" ? "purchase" : "default";
+          const title =
+            workspaceKey === "ops.purchase"
+              ? editing.id
+                ? `选品修改（ID: ${editing.id}）`
+                : "新增选品"
+              : editing.id
+                ? `修改（ID: ${editing.id}）`
+                : "新增";
+
+          return <DefaultEditModal title={title} dataEditModal={dataEditModal} body={body} />;
+        })()
       ) : null}
     </div>
   );
