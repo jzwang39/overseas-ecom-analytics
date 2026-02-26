@@ -10,6 +10,12 @@ export const runtime = "nodejs";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 
+function getUploadBaseDir() {
+  const env = process.env.UPLOAD_DIR;
+  if (env && env.trim()) return env.trim();
+  return path.join(process.cwd(), "public", "uploads");
+}
+
 function safeExtFromMime(mime: string) {
   if (mime === "image/png") return ".png";
   if (mime === "image/jpeg") return ".jpg";
@@ -35,7 +41,7 @@ export async function POST(req: NextRequest) {
   const now = new Date();
   const y = String(now.getFullYear());
   const m = String(now.getMonth() + 1).padStart(2, "0");
-  const dir = path.join(process.cwd(), "public", "uploads", `${y}${m}`);
+  const dir = path.join(getUploadBaseDir(), `${y}${m}`);
   await fs.mkdir(dir, { recursive: true });
 
   const ext = safeExtFromMime(file.type);

@@ -1450,7 +1450,7 @@ export function WorkspaceClient({
         <div className="flex flex-col gap-3">
           {schema ? (
             <div className="flex flex-col gap-3">
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className={["grid gap-3", workspaceKey === "ops.inquiry" ? "sm:grid-cols-4" : "sm:grid-cols-3"].join(" ")}>
                 {filterFields.map((f) => (
                   workspaceKey === "ops.inquiry" && (f === "名称" || f === "所属类目") ? (
                     <div key={f} className="flex flex-col gap-1">
@@ -1490,22 +1490,9 @@ export function WorkspaceClient({
                     </select>
                   </div>
                 ) : null}
-                {workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry" ? (
-                  workspaceKey === "ops.inquiry" ? (
-                    <div className="flex flex-col gap-1">
-                      <div className="text-xs text-muted">时间范围</div>
-                      <select
-                        value={timeRange}
-                        onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
-                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
-                      >
-                        <option value="">请选择</option>
-                        <option value="today">今天</option>
-                        <option value="7d">7日内</option>
-                        <option value="30d">30天内</option>
-                      </select>
-                    </div>
-                  ) : (
+                {workspaceKey === "ops.inquiry" ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">时间范围</div>
                     <select
                       value={timeRange}
                       onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
@@ -1516,8 +1503,19 @@ export function WorkspaceClient({
                       <option value="7d">7日内</option>
                       <option value="30d">30天内</option>
                     </select>
-                  )
-                ) : null}
+                  </div>
+                ) : (
+                  <select
+                    value={timeRange}
+                    onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
+                    className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                  >
+                    <option value="">请选择</option>
+                    <option value="today">今天</option>
+                    <option value="7d">7日内</option>
+                    <option value="30d">30天内</option>
+                  </select>
+                )}
               </div>
               <div className="flex items-center justify-end gap-3">
                 <button
@@ -3003,6 +3001,13 @@ export function WorkspaceClient({
                               inputMode={kind === "number" ? "decimal" : undefined}
                               value={value}
                               onChange={(e) => setValue(e.target.value)}
+                              onWheel={
+                                kind === "number"
+                                  ? (e) => {
+                                      e.currentTarget.blur();
+                                    }
+                                  : undefined
+                              }
                               className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                             />
                           </div>
@@ -3081,6 +3086,9 @@ export function WorkspaceClient({
                                       inputMode="decimal"
                                       value={len}
                                       onChange={(e) => setField("产品尺寸-长（厘米）", e.target.value)}
+                                      onWheel={(e) => {
+                                        e.currentTarget.blur();
+                                      }}
                                       placeholder="长"
                                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                     />
@@ -3089,6 +3097,9 @@ export function WorkspaceClient({
                                       inputMode="decimal"
                                       value={wid}
                                       onChange={(e) => setField("产品尺寸-宽（厘米）", e.target.value)}
+                                      onWheel={(e) => {
+                                        e.currentTarget.blur();
+                                      }}
                                       placeholder="宽"
                                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                     />
@@ -3097,6 +3108,9 @@ export function WorkspaceClient({
                                       inputMode="decimal"
                                       value={hei}
                                       onChange={(e) => setField("产品尺寸-高（厘米）", e.target.value)}
+                                      onWheel={(e) => {
+                                        e.currentTarget.blur();
+                                      }}
                                       placeholder="高"
                                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                     />
