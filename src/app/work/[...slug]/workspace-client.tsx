@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getWorkspaceSchema } from "@/lib/workspace/schemas";
 import { useSession } from "next-auth/react";
 
@@ -680,6 +680,8 @@ export function WorkspaceClient({
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [imageIndexByField, setImageIndexByField] = useState<Record<string, number>>({});
   const [linkDraftByField, setLinkDraftByField] = useState<Record<string, string[]>>({});
+  const linkInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const pendingLinkFocusKey = useRef<string | null>(null);
 
   const [editing, setEditing] = useState<{ id: number | null; data: Record<string, string> } | null>(
     null,
@@ -824,6 +826,20 @@ export function WorkspaceClient({
     if (editing) return;
     setLinkDraftByField({});
   }, [editing]);
+
+  useLayoutEffect(() => {
+    const key = pendingLinkFocusKey.current;
+    if (!key) return;
+    pendingLinkFocusKey.current = null;
+    const el = linkInputRefs.current[key];
+    if (!el) return;
+    if (document.activeElement === el) return;
+    el.focus();
+    const len = el.value.length;
+    try {
+      el.setSelectionRange(len, len);
+    } catch {}
+  }, [linkDraftByField]);
 
   useEffect(() => {
     if (!schema) return;
@@ -1239,10 +1255,26 @@ export function WorkspaceClient({
 
     const operatorValue = operatorName;
 
+    const referenceLinksOverride = (() => {
+      if (!schema.fields.includes("参考链接")) return null;
+      const raw = linkDraftByField["参考链接"] ?? parseDelimitedValues(String(editing.data["参考链接"] ?? ""));
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const it of raw) {
+        const t = String(it ?? "").trim();
+        if (!t) continue;
+        if (seen.has(t)) continue;
+        seen.add(t);
+        out.push(t);
+      }
+      return out.length > 0 ? joinDelimitedValues(out) : "";
+    })();
+
     for (const f of visibleFields) {
       if (f === "创建时间" || f === "最后更新时间") continue;
       if (f === "运营人员") continue;
-      const v = (editing.data[f] ?? "").trim();
+      const rawValue = f === "参考链接" && referenceLinksOverride != null ? referenceLinksOverride : (editing.data[f] ?? "");
+      const v = String(rawValue).trim();
       const kind = getFieldKind(f);
       if (kind === "url" && v) {
         const parts = parseDelimitedValues(v);
@@ -1272,6 +1304,7 @@ export function WorkspaceClient({
     if (schema.fields.includes("状态")) payload["状态"] = INQUIRY_STATUS_VALUE;
     if (!editing.id && schema.fields.includes("创建时间")) payload["创建时间"] = formatNow();
     if (schema.fields.includes("最后更新时间")) payload["最后更新时间"] = editing.id ? formatNow() : null;
+    if (referenceLinksOverride != null) payload["参考链接"] = referenceLinksOverride;
 
     if (schema.fields.includes("产品规则") && schema.fields.includes("产品规格")) {
       const rawSpecs =
@@ -1417,7 +1450,7 @@ export function WorkspaceClient({
         <div className="flex items-center gap-2">
           {schema ? (
             <>
-              {hideInquiryCreateButton ? null : (
+              {hideInquiryCreateButton || workspaceKey === "ops.inquiry" ? null : (
                 <button
                   type="button"
                   className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
@@ -1450,9 +1483,14 @@ export function WorkspaceClient({
         <div className="flex flex-col gap-3">
           {schema ? (
             <div className="flex flex-col gap-3">
-              <div className={["grid gap-3", workspaceKey === "ops.inquiry" ? "sm:grid-cols-4" : "sm:grid-cols-3"].join(" ")}>
+              <div
+                className={[
+                  "grid gap-3",
+                  workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" ? "sm:grid-cols-4" : "sm:grid-cols-3",
+                ].join(" ")}
+              >
                 {filterFields.map((f) => (
-                  workspaceKey === "ops.inquiry" && (f === "名称" || f === "所属类目") ? (
+                  (workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase") && (f === "名称" || f === "所属类目") ? (
                     <div key={f} className="flex flex-col gap-1">
                       <div className="text-xs text-muted">{displayFieldLabel(f)}</div>
                       <input
@@ -1472,7 +1510,7 @@ export function WorkspaceClient({
                     />
                   )
                 ))}
-                {workspaceKey === "ops.inquiry" ? (
+                {workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" ? (
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">状态</div>
                     <select
@@ -1490,7 +1528,7 @@ export function WorkspaceClient({
                     </select>
                   </div>
                 ) : null}
-                {workspaceKey === "ops.inquiry" ? (
+                {workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" ? (
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">时间范围</div>
                     <select
@@ -2884,12 +2922,15 @@ export function WorkspaceClient({
                                   {list.map((it, idx) => (
                                     <div key={idx} className="flex items-center gap-2">
                                       <input
+                                        ref={(el) => {
+                                          linkInputRefs.current[`${f}-${idx}`] = el;
+                                        }}
                                         type="url"
                                         value={it}
                                         onChange={(e) => {
+                                          pendingLinkFocusKey.current = `${f}-${idx}`;
                                           const nextList = list.map((v, i) => (i === idx ? e.target.value : v));
                                           setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
-                                          setValue(joinDelimitedValues(nextList));
                                         }}
                                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                       />
@@ -2900,7 +2941,6 @@ export function WorkspaceClient({
                                           const nextList = list.filter((_, i) => i !== idx);
                                           const normalized = nextList.length > 0 ? nextList : [""];
                                           setLinkDraftByField((prev) => ({ ...prev, [f]: normalized }));
-                                          setValue(joinDelimitedValues(nextList));
                                         }}
                                       >
                                         删除
@@ -2913,7 +2953,6 @@ export function WorkspaceClient({
                                     onClick={() => {
                                       const nextList = [...list, ""];
                                       setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
-                                      setValue(joinDelimitedValues(nextList));
                                     }}
                                   >
                                     + 添加链接
