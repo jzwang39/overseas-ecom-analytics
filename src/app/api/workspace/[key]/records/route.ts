@@ -43,6 +43,18 @@ function normalizeWorkspaceData(workspaceKey: string, input: Record<string, unkn
   return out;
 }
 
+function parseYmd(value: string) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mm = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mm) || !Number.isFinite(d)) return null;
+  const dt = new Date(y, mm - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== mm - 1 || dt.getDate() !== d) return null;
+  return dt;
+}
+
 export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string }> }) {
   await ensureInitialSuperAdmin();
   const session = await getSession();
@@ -56,6 +68,8 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
   const filtersRaw = url.searchParams.get("filters");
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get("limit") ?? "50")));
   const timeRangeRaw = url.searchParams.get("timeRange") ?? "";
+  const startDateRaw = url.searchParams.get("startDate") ?? "";
+  const endDateRaw = url.searchParams.get("endDate") ?? "";
 
   const filtersParsed = z
     .string()
@@ -71,7 +85,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
 
   if (!filtersParsed.success) return NextResponse.json({ error: "参数错误" }, { status: 400 });
 
-  const timeRangeParsed = z.enum(["", "today", "7d", "30d"]).safeParse(timeRangeRaw);
+  const timeRangeParsed = z.enum(["", "today", "7d", "30d", "custom"]).safeParse(timeRangeRaw);
   if (!timeRangeParsed.success) return NextResponse.json({ error: "参数错误" }, { status: 400 });
 
   const pool = getPool();
@@ -93,6 +107,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
 
   if (timeRangeParsed.data) {
     let start: Date | null = null;
+    let end: Date | null = null;
     if (timeRangeParsed.data === "today") {
       start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -100,10 +115,23 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
       start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     } else if (timeRangeParsed.data === "30d") {
       start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    } else if (timeRangeParsed.data === "custom") {
+      const startDate = parseYmd(startDateRaw);
+      const endDate = parseYmd(endDateRaw);
+      if (!startDate || !endDate) return NextResponse.json({ error: "参数错误" }, { status: 400 });
+      if (startDate.getTime() > endDate.getTime()) return NextResponse.json({ error: "参数错误" }, { status: 400 });
+      start = startDate;
+      start.setHours(0, 0, 0, 0);
+      end = endDate;
+      end.setHours(23, 59, 59, 999);
     }
     if (start) {
       where.push("updated_at >= ?");
       params.push(start);
+    }
+    if (end) {
+      where.push("updated_at <= ?");
+      params.push(end);
     }
   }
 

@@ -251,13 +251,38 @@ export function AppShell({
   const { data } = useSession();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(menuGroups.map((g) => [g.key, true])),
   );
 
-  const effectiveWidth = collapsed ? 60 : sidebarWidth;
+  const autoSidebarWidth = useMemo(() => {
+    if (typeof window === "undefined") return 240;
+
+    const labels = menuGroups.flatMap((group) => [
+      group.label,
+      ...group.items.map((item) => item.label),
+    ]);
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return 240;
+
+    const bodyStyle = getComputedStyle(document.body);
+    const fontFamily = bodyStyle.fontFamily || "ui-sans-serif, system-ui, sans-serif";
+    ctx.font = `400 14px ${fontFamily}`;
+
+    let maxTextWidth = 0;
+    for (const label of labels) {
+      maxTextWidth = Math.max(maxTextWidth, ctx.measureText(label).width);
+    }
+
+    const paddingAndIconsWidth = 92;
+    return Math.max(200, Math.min(420, Math.ceil(maxTextWidth + paddingAndIconsWidth)));
+  }, [menuGroups]);
+
+  const effectiveWidth = collapsed ? 60 : (sidebarWidth ?? autoSidebarWidth);
   const sidebarStyle = useMemo(
     () => ({ width: `${effectiveWidth}px` }),
     [effectiveWidth],
@@ -265,14 +290,14 @@ export function AppShell({
 
   function onDragStart(e: React.PointerEvent) {
     if (collapsed) return;
-    dragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+    dragRef.current = { startX: e.clientX, startWidth: effectiveWidth };
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
   }
 
   function onDragMove(e: React.PointerEvent) {
     if (!dragRef.current) return;
     const delta = e.clientX - dragRef.current.startX;
-    const next = Math.max(220, Math.min(420, dragRef.current.startWidth + delta));
+    const next = Math.max(200, Math.min(420, dragRef.current.startWidth + delta));
     setSidebarWidth(next);
   }
 

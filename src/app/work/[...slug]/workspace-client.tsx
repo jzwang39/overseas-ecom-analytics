@@ -34,6 +34,24 @@ function looksLikeImagePath(value: string) {
   );
 }
 
+function sanitizeDecimalInput(raw: string) {
+  const normalized = raw.replace(/[，。]/g, ".");
+  let out = "";
+  let dotSeen = false;
+  for (const ch of normalized) {
+    if (ch >= "0" && ch <= "9") {
+      out += ch;
+      continue;
+    }
+    if (ch === "." && !dotSeen) {
+      out += ".";
+      dotSeen = true;
+    }
+  }
+  if (out.startsWith(".")) return `0${out}`;
+  return out;
+}
+
 type FieldKind = "text" | "url" | "number" | "image" | "category" | "yesno";
 
 const IMAGE_FIELDS = new Set(["产品图片", "产品实物图", "包裹实物包装图"]);
@@ -675,13 +693,19 @@ export function WorkspaceClient({
 
   const schema = useMemo(() => getWorkspaceSchema(workspaceKey), [workspaceKey]);
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [timeRange, setTimeRange] = useState<"" | "today" | "7d" | "30d">("");
+  const [timeRange, setTimeRange] = useState<"" | "today" | "7d" | "30d" | "custom">("");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
   const [uploadingField, setUploadingField] = useState<string | null>(null);
   const [imageIndexByField, setImageIndexByField] = useState<Record<string, number>>({});
   const [linkDraftByField, setLinkDraftByField] = useState<Record<string, string[]>>({});
   const linkInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const pendingLinkFocusKey = useRef<string | null>(null);
+  const editFieldRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingEditFocus = useRef<{ key: string; selectionStart: number | null; selectionEnd: number | null } | null>(
+    null,
+  );
 
   const [editing, setEditing] = useState<{ id: number | null; data: Record<string, string> } | null>(
     null,
@@ -763,6 +787,10 @@ export function WorkspaceClient({
   );
   const [inquiryAssigneeLoading, setInquiryAssigneeLoading] = useState(false);
   const [inquiryAssignSaving, setInquiryAssignSaving] = useState(false);
+  const [inquiryBulkAssignOpen, setInquiryBulkAssignOpen] = useState(false);
+  const [inquiryBulkAssignPerson, setInquiryBulkAssignPerson] = useState("");
+  const [inquiryBulkAssignSaving, setInquiryBulkAssignSaving] = useState(false);
+  const [inquirySelectedIds, setInquirySelectedIds] = useState<Set<number>>(() => new Set());
 
   const operatorName = useMemo(() => {
     const name = session?.user?.name;
@@ -772,6 +800,9 @@ export function WorkspaceClient({
 
   useEffect(() => {
     setFilters({});
+    setTimeRange("");
+    setCustomStartDate("");
+    setCustomEndDate("");
     setEditing(null);
     setInquiryCreateOpen(false);
     setInquiryUnits("cmkg");
@@ -817,6 +848,10 @@ export function WorkspaceClient({
     setInquiryAssigneeOptions([]);
     setInquiryAssigneeLoading(false);
     setInquiryAssignSaving(false);
+    setInquiryBulkAssignOpen(false);
+    setInquiryBulkAssignPerson("");
+    setInquiryBulkAssignSaving(false);
+    setInquirySelectedIds(new Set());
     setUploadingField(null);
     setImageIndexByField({});
     setLinkDraftByField({});
@@ -840,6 +875,24 @@ export function WorkspaceClient({
       el.setSelectionRange(len, len);
     } catch {}
   }, [linkDraftByField]);
+
+  useLayoutEffect(() => {
+    const pending = pendingEditFocus.current;
+    if (!pending) return;
+    pendingEditFocus.current = null;
+    const el = editFieldRefs.current[pending.key];
+    if (!el) return;
+    if (document.activeElement !== el) el.focus();
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const start = pending.selectionStart;
+      const end = pending.selectionEnd;
+      if (start != null && end != null) {
+        try {
+          el.setSelectionRange(start, end);
+        } catch {}
+      }
+    }
+  }, [editing]);
 
   useEffect(() => {
     if (!schema) return;
@@ -913,9 +966,16 @@ export function WorkspaceClient({
     }
     const qs = new URLSearchParams();
     if (Object.keys(active).length) qs.set("filters", JSON.stringify(active));
+    if (workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry") {
+      if (timeRange) qs.set("timeRange", timeRange);
+      if (timeRange === "custom") {
+        if (customStartDate) qs.set("startDate", customStartDate);
+        if (customEndDate) qs.set("endDate", customEndDate);
+      }
+    }
     const s = qs.toString();
     return s ? `${base}?${s}` : base;
-  }, [filters, q, schema, visibleFields, workspaceKey]);
+  }, [customEndDate, customStartDate, filters, q, schema, timeRange, visibleFields, workspaceKey]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -932,7 +992,13 @@ export function WorkspaceClient({
         }
         const qs = new URLSearchParams();
         if (Object.keys(active).length) qs.set("filters", JSON.stringify(active));
-        if ((workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry") && timeRange) qs.set("timeRange", timeRange);
+        if (workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry") {
+          if (timeRange) qs.set("timeRange", timeRange);
+          if (timeRange === "custom") {
+            if (customStartDate) qs.set("startDate", customStartDate);
+            if (customEndDate) qs.set("endDate", customEndDate);
+          }
+        }
         const s = qs.toString();
         url = s ? `${base}?${s}` : base;
       }
@@ -942,11 +1008,23 @@ export function WorkspaceClient({
     } finally {
       setLoading(false);
     }
-  }, [filters, q, schema, timeRange, visibleFields, workspaceKey]);
+  }, [customEndDate, customStartDate, filters, q, schema, timeRange, visibleFields, workspaceKey]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (workspaceKey !== "ops.inquiry") return;
+    setInquirySelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const current = new Set<number>();
+      for (const r of records) current.add(r.id);
+      const next = new Set<number>();
+      for (const id of prev) if (current.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [records, workspaceKey]);
 
   function openCreate() {
     if (!schema) return;
@@ -1148,6 +1226,52 @@ export function WorkspaceClient({
       await load();
     } finally {
       setInquiryAssignSaving(false);
+    }
+  }
+
+  function openInquiryBulkAssign() {
+    if (workspaceKey !== "ops.inquiry") return;
+    if (inquirySelectedIds.size === 0) return;
+    setEditing(null);
+    setInquiryCreateOpen(false);
+    setInquiryAssignOpen(false);
+    setInquiryAssignRecordId(null);
+    setInquiryAssignPerson("");
+    setInquiryBulkAssignSaving(false);
+    setInquiryBulkAssignOpen(true);
+    void ensureInquiryAssigneesLoaded();
+  }
+
+  async function saveInquiryBulkAssign() {
+    if (inquiryBulkAssignSaving) return;
+    if (workspaceKey !== "ops.inquiry") return;
+    const ids = Array.from(inquirySelectedIds);
+    if (ids.length === 0) return;
+    const assignee = inquiryBulkAssignPerson.trim();
+    if (!assignee) {
+      alert("请选择询价人");
+      return;
+    }
+    setInquiryBulkAssignSaving(true);
+    try {
+      const res = await fetch("/api/ops/inquiry/assign", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recordIds: ids, assigneeUsername: assignee }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "批量分配失败");
+        return;
+      }
+      setInquiryBulkAssignOpen(false);
+      setInquiryBulkAssignPerson("");
+      setInquirySelectedIds(new Set());
+      await load();
+    } finally {
+      setInquiryBulkAssignSaving(false);
     }
   }
 
@@ -1533,32 +1657,80 @@ export function WorkspaceClient({
                     <div className="text-xs text-muted">时间范围</div>
                     <select
                       value={timeRange}
-                      onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
+                      onChange={(e) => {
+                        const next = e.target.value as "" | "today" | "7d" | "30d" | "custom";
+                        setTimeRange(next);
+                        if (next !== "custom") {
+                          setCustomStartDate("");
+                          setCustomEndDate("");
+                        }
+                      }}
                       className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
                     >
                       <option value="">请选择</option>
                       <option value="today">今天</option>
                       <option value="7d">7日内</option>
                       <option value="30d">30天内</option>
+                      <option value="custom">自定义</option>
                     </select>
+                    {timeRange === "custom" ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="date"
+                          value={customStartDate}
+                          onChange={(e) => setCustomStartDate(e.target.value)}
+                          className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                        />
+                        <input
+                          type="date"
+                          value={customEndDate}
+                          onChange={(e) => setCustomEndDate(e.target.value)}
+                          className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                        />
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <select
                     value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value as "" | "today" | "7d" | "30d")}
+                    onChange={(e) => {
+                      const next = e.target.value as "" | "today" | "7d" | "30d" | "custom";
+                      setTimeRange(next);
+                      if (next !== "custom") {
+                        setCustomStartDate("");
+                        setCustomEndDate("");
+                      }
+                    }}
                     className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
                   >
                     <option value="">请选择</option>
                     <option value="today">今天</option>
                     <option value="7d">7日内</option>
                     <option value="30d">30天内</option>
+                    <option value="custom">自定义</option>
                   </select>
                 )}
               </div>
-              <div className="flex items-center justify-end gap-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  {workspaceKey === "ops.inquiry" ? (
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2 disabled:opacity-50"
+                      disabled={inquirySelectedIds.size === 0}
+                      onClick={openInquiryBulkAssign}
+                    >
+                      批量分配询价人{inquirySelectedIds.size > 0 ? `（${inquirySelectedIds.size}）` : ""}
+                    </button>
+                  ) : null}
+                </div>
                 <button
                   type="button"
-                  disabled={loading}
+                  disabled={
+                    loading ||
+                    (timeRange === "custom" &&
+                      (!customStartDate || !customEndDate || customStartDate > customEndDate))
+                  }
                   className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
                   onClick={load}
                 >
@@ -1591,6 +1763,24 @@ export function WorkspaceClient({
                 <table className="min-w-max border-separate border-spacing-0">
                   <thead>
                     <tr className="bg-surface-2 text-xs text-muted">
+                      {workspaceKey === "ops.inquiry" ? (
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <input
+                            type="checkbox"
+                            checked={records.length > 0 && records.every((r) => inquirySelectedIds.has(r.id))}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setInquirySelectedIds(() => {
+                                if (!checked) return new Set();
+                                const next = new Set<number>();
+                                for (const r of records) next.add(r.id);
+                                return next;
+                              });
+                            }}
+                            aria-label="全选"
+                          />
+                        </th>
+                      ) : null}
                       {tableFields.map((f) => (
                         <th key={f} className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
                           {displayFieldLabel(f)}
@@ -1602,7 +1792,12 @@ export function WorkspaceClient({
                   <tbody className="text-sm">
                     {records.length === 0 ? (
                       <tr>
-                        <td className="px-3 py-6 text-sm text-muted" colSpan={tableFields.length + 1}>
+                        <td
+                          className="px-3 py-6 text-sm text-muted"
+                          colSpan={
+                            tableFields.length + 1 + (workspaceKey === "ops.inquiry" ? 1 : 0)
+                          }
+                        >
                           暂无数据
                         </td>
                       </tr>
@@ -1611,6 +1806,24 @@ export function WorkspaceClient({
                         const obj = toRecordStringUnknown(row.data);
                         return (
                           <tr key={row.id} className="border-b border-border">
+                            {workspaceKey === "ops.inquiry" ? (
+                              <td className="border-b border-border px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={inquirySelectedIds.has(row.id)}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setInquirySelectedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(row.id);
+                                      else next.delete(row.id);
+                                      return next;
+                                    });
+                                  }}
+                                  aria-label={`选择 ID ${row.id}`}
+                                />
+                              </td>
+                            ) : null}
                             {tableFields.map((f) => {
                               const v = obj[f] == null ? "" : String(obj[f]);
                               const kind = getFieldKind(f);
@@ -1652,18 +1865,22 @@ export function WorkspaceClient({
                                   ) : kind === "url" ? (
                                     (() => {
                                       const urlList = parseDelimitedValues(v).filter(looksLikeUrl);
-                                      const first = urlList[0] ?? "";
-                                      if (!first) return v || "—";
+                                      if (urlList.length === 0) return v || "—";
                                       return (
-                                        <a
-                                          className="text-foreground underline"
-                                          href={first}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          title={urlList.join("\n")}
-                                        >
-                                          {urlList.length > 1 ? `链接（${urlList.length}）` : "链接"}
-                                        </a>
+                                        <div className="flex flex-wrap gap-x-2 gap-y-1">
+                                          {urlList.map((u, idx) => (
+                                            <a
+                                              key={`${u}-${idx}`}
+                                              className="text-foreground underline"
+                                              href={u}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              title={u}
+                                            >
+                                              {urlList.length > 1 ? `链接${idx + 1}` : "链接"}
+                                            </a>
+                                          ))}
+                                        </div>
                                       );
                                     })()
                                   ) : (
@@ -2318,6 +2535,88 @@ export function WorkspaceClient({
         </EditModalShell>
       ) : null}
 
+      {inquiryBulkAssignOpen ? (
+        <EditModalShell
+          title={`批量分配询价人（${inquirySelectedIds.size}条）`}
+          dataEditModal="inquiry-bulk-assign"
+          onClose={() => {
+            setInquiryBulkAssignOpen(false);
+            setInquiryBulkAssignPerson("");
+          }}
+        >
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-3">
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">已选择记录</div>
+                <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">
+                  {(() => {
+                    const selected = records.filter((r) => inquirySelectedIds.has(r.id));
+                    if (selected.length === 0) return <div className="py-1">暂无选择</div>;
+                    return (
+                      <ul className="list-disc pl-5">
+                        {selected.map((r) => {
+                          const obj = toRecordStringUnknown(r.data);
+                          const name = String(obj["名称"] ?? "").trim();
+                          const cat = String(obj["所属类目"] ?? "").trim();
+                          return (
+                            <li key={r.id} className="py-1">
+                              <span>ID：{r.id}</span>
+                              {name ? <span>，名称：{name}</span> : null}
+                              {cat ? <span>，所属类目：{cat}</span> : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs text-muted">选择询价人</div>
+                  <select
+                    value={inquiryBulkAssignPerson}
+                    onChange={(e) => setInquiryBulkAssignPerson(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    disabled={inquiryAssigneeLoading}
+                  >
+                    <option value="">请选择</option>
+                    {inquiryAssigneeOptions.map((u) => (
+                      <option key={u.username} value={u.username}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setInquiryBulkAssignOpen(false);
+                setInquiryBulkAssignPerson("");
+              }}
+              disabled={inquiryBulkAssignSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
+              onClick={saveInquiryBulkAssign}
+              disabled={inquiryBulkAssignSaving || inquiryAssigneeLoading || !inquiryBulkAssignPerson.trim()}
+            >
+              {inquiryBulkAssignSaving ? "提交中…" : "确认分配"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
       {editing ? (
         (() => {
           const body = (
@@ -2334,6 +2633,7 @@ export function WorkspaceClient({
 
                   const renderField = (f: string, opts?: { hideLabel?: boolean; wrapperClassName?: string }) => {
                     const kind = getFieldKind(f);
+                    const focusKey = `edit-${f}`;
                     const sourceForInch = getCmSourceForInchField(schema, f);
                     const maxRule = getMaxComputedRule(schema, f);
                     const multRule = getMultiplierCeilRule(schema, f);
@@ -2757,14 +3057,22 @@ export function WorkspaceClient({
                                     </select>
                                     {currentYesNo === "是" ? (
                                       <input
+                                        ref={(el) => {
+                                          editFieldRefs.current[`edit-${descField}`] = el;
+                                        }}
                                         value={descValue}
-                                        onChange={(e) =>
+                                        onChange={(e) => {
+                                          pendingEditFocus.current = {
+                                            key: `edit-${descField}`,
+                                            selectionStart: e.currentTarget.selectionStart,
+                                            selectionEnd: e.currentTarget.selectionEnd,
+                                          };
                                           setEditing((prev) => {
                                             if (!prev) return prev;
                                             const nextData: Record<string, string> = { ...prev.data, [descField]: e.target.value };
                                             return { ...prev, data: applyComputedFields(schema, nextData) };
-                                          })
-                                        }
+                                          });
+                                        }}
                                         placeholder="请输入风险描述"
                                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                       />
@@ -2874,7 +3182,17 @@ export function WorkspaceClient({
                                   ) : (
                                     <textarea
                                       value={value}
-                                      onChange={(e) => setValue(e.target.value)}
+                                      ref={(el) => {
+                                        editFieldRefs.current[focusKey] = el;
+                                      }}
+                                      onChange={(e) => {
+                                        pendingEditFocus.current = {
+                                          key: focusKey,
+                                          selectionStart: e.currentTarget.selectionStart,
+                                          selectionEnd: e.currentTarget.selectionEnd,
+                                        };
+                                        setValue(e.target.value);
+                                      }}
                                       rows={4}
                                       placeholder="请输入规格（可用逗号或换行分隔）"
                                       className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
@@ -3003,8 +3321,18 @@ export function WorkspaceClient({
                                   </select>
                                   {selectValue === otherOption ? (
                                     <input
+                                      ref={(el) => {
+                                        editFieldRefs.current[`${focusKey}__other`] = el;
+                                      }}
                                       value={otherValue}
-                                      onChange={(e) => setValue(e.target.value)}
+                                      onChange={(e) => {
+                                        pendingEditFocus.current = {
+                                          key: `${focusKey}__other`,
+                                          selectionStart: e.currentTarget.selectionStart,
+                                          selectionEnd: e.currentTarget.selectionEnd,
+                                        };
+                                        setValue(e.target.value);
+                                      }}
                                       placeholder="请输入其他选品逻辑"
                                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                     />
@@ -3039,7 +3367,44 @@ export function WorkspaceClient({
                               type={kind === "url" ? "url" : kind === "number" ? "number" : "text"}
                               inputMode={kind === "number" ? "decimal" : undefined}
                               value={value}
-                              onChange={(e) => setValue(e.target.value)}
+                              ref={(el) => {
+                                editFieldRefs.current[focusKey] = el;
+                              }}
+                              onChange={(e) => {
+                                pendingEditFocus.current = {
+                                  key: focusKey,
+                                  selectionStart: e.currentTarget.selectionStart,
+                                  selectionEnd: e.currentTarget.selectionEnd,
+                                };
+                                if (kind === "number") {
+                                  setValue(sanitizeDecimalInput(e.target.value));
+                                  return;
+                                }
+                                setValue(e.target.value);
+                              }}
+                              onKeyDown={
+                                kind === "number"
+                                  ? (e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }
+                                  : undefined
+                              }
+                              onPaste={
+                                kind === "number"
+                                  ? (e) => {
+                                      const text = e.clipboardData.getData("text");
+                                      const next = sanitizeDecimalInput(text);
+                                      if (!next) return;
+                                      e.preventDefault();
+                                      pendingEditFocus.current = {
+                                        key: focusKey,
+                                        selectionStart: null,
+                                        selectionEnd: null,
+                                      };
+                                      setValue(next);
+                                    }
+                                  : undefined
+                              }
                               onWheel={
                                 kind === "number"
                                   ? (e) => {
@@ -3124,7 +3489,28 @@ export function WorkspaceClient({
                                       type="number"
                                       inputMode="decimal"
                                       value={len}
-                                      onChange={(e) => setField("产品尺寸-长（厘米）", e.target.value)}
+                                      ref={(el) => {
+                                        editFieldRefs.current["edit-产品尺寸-长（厘米）"] = el;
+                                      }}
+                                      onChange={(e) => {
+                                        pendingEditFocus.current = {
+                                          key: "edit-产品尺寸-长（厘米）",
+                                          selectionStart: e.currentTarget.selectionStart,
+                                          selectionEnd: e.currentTarget.selectionEnd,
+                                        };
+                                        setField("产品尺寸-长（厘米）", sanitizeDecimalInput(e.target.value));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                      }}
+                                      onPaste={(e) => {
+                                        const text = e.clipboardData.getData("text");
+                                        const next = sanitizeDecimalInput(text);
+                                        if (!next) return;
+                                        e.preventDefault();
+                                        pendingEditFocus.current = { key: "edit-产品尺寸-长（厘米）", selectionStart: null, selectionEnd: null };
+                                        setField("产品尺寸-长（厘米）", next);
+                                      }}
                                       onWheel={(e) => {
                                         e.currentTarget.blur();
                                       }}
@@ -3135,7 +3521,28 @@ export function WorkspaceClient({
                                       type="number"
                                       inputMode="decimal"
                                       value={wid}
-                                      onChange={(e) => setField("产品尺寸-宽（厘米）", e.target.value)}
+                                      ref={(el) => {
+                                        editFieldRefs.current["edit-产品尺寸-宽（厘米）"] = el;
+                                      }}
+                                      onChange={(e) => {
+                                        pendingEditFocus.current = {
+                                          key: "edit-产品尺寸-宽（厘米）",
+                                          selectionStart: e.currentTarget.selectionStart,
+                                          selectionEnd: e.currentTarget.selectionEnd,
+                                        };
+                                        setField("产品尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                      }}
+                                      onPaste={(e) => {
+                                        const text = e.clipboardData.getData("text");
+                                        const next = sanitizeDecimalInput(text);
+                                        if (!next) return;
+                                        e.preventDefault();
+                                        pendingEditFocus.current = { key: "edit-产品尺寸-宽（厘米）", selectionStart: null, selectionEnd: null };
+                                        setField("产品尺寸-宽（厘米）", next);
+                                      }}
                                       onWheel={(e) => {
                                         e.currentTarget.blur();
                                       }}
@@ -3146,7 +3553,28 @@ export function WorkspaceClient({
                                       type="number"
                                       inputMode="decimal"
                                       value={hei}
-                                      onChange={(e) => setField("产品尺寸-高（厘米）", e.target.value)}
+                                      ref={(el) => {
+                                        editFieldRefs.current["edit-产品尺寸-高（厘米）"] = el;
+                                      }}
+                                      onChange={(e) => {
+                                        pendingEditFocus.current = {
+                                          key: "edit-产品尺寸-高（厘米）",
+                                          selectionStart: e.currentTarget.selectionStart,
+                                          selectionEnd: e.currentTarget.selectionEnd,
+                                        };
+                                        setField("产品尺寸-高（厘米）", sanitizeDecimalInput(e.target.value));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                      }}
+                                      onPaste={(e) => {
+                                        const text = e.clipboardData.getData("text");
+                                        const next = sanitizeDecimalInput(text);
+                                        if (!next) return;
+                                        e.preventDefault();
+                                        pendingEditFocus.current = { key: "edit-产品尺寸-高（厘米）", selectionStart: null, selectionEnd: null };
+                                        setField("产品尺寸-高（厘米）", next);
+                                      }}
                                       onWheel={(e) => {
                                         e.currentTarget.blur();
                                       }}

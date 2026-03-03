@@ -94,30 +94,24 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json().catch(() => null);
   const parsed = z
-    .object({
-      recordId: z.number().int(),
-      assigneeUsername: z.string().trim().min(1),
-    })
+    .union([
+      z.object({
+        recordId: z.number().int(),
+        assigneeUsername: z.string().trim().min(1),
+      }),
+      z.object({
+        recordIds: z.array(z.number().int()).min(1).max(200),
+        assigneeUsername: z.string().trim().min(1),
+      }),
+    ])
     .safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "参数错误" }, { status: 400 });
 
   try {
     const pool = getPool();
-    const [rows] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
-      "SELECT id, data FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
-      [parsed.data.recordId, "ops.purchase"],
-    );
-    if (rows.length === 0) return NextResponse.json({ error: "不存在" }, { status: 404 });
-
-    const obj = toObject(rows[0]?.data);
-    if (!obj) return NextResponse.json({ error: "数据格式错误" }, { status: 500 });
-
     const isAdmin = session.user.permissionLevel !== "user";
     const isOwnerRole = await isRoleName(toRoleId(session.user.roleId), "询价负责人");
     const currentUsername = typeof session.user.username === "string" ? session.user.username : "";
-    const recordOwner = String(obj["询价负责人"] ?? "").trim();
-    const isRecordOwner = Boolean(currentUsername && recordOwner && recordOwner === currentUsername);
-    if (!isAdmin && !isOwnerRole && !isRecordOwner) return NextResponse.json({ error: "无权限" }, { status: 403 });
 
     const [assignees] = await pool.query<(RowDataPacket & { username: string })[]>(
       `
@@ -134,25 +128,88 @@ export async function PATCH(req: NextRequest) {
     );
     if (assignees.length === 0) return NextResponse.json({ error: "询价人不存在或无权限" }, { status: 400 });
 
-    const next: Record<string, unknown> = { ...obj };
-    next["询价人"] = parsed.data.assigneeUsername;
-    next["最后更新时间"] = todayYmd();
+    const now = todayYmd();
 
-    await pool.query<ResultSetHeader>("UPDATE workspace_records SET data = CAST(? AS JSON) WHERE id = ?", [
-      JSON.stringify(next),
-      parsed.data.recordId,
-    ]);
+    if ("recordId" in parsed.data) {
+      const [rows] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
+        "SELECT id, data FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
+        [parsed.data.recordId, "ops.purchase"],
+      );
+      if (rows.length === 0) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
-    await logOperation({
-      req,
-      actorUserId: session.user.id,
-      action: "inquiry.assign",
-      targetType: "workspace_record",
-      targetId: String(parsed.data.recordId),
-      detail: { workspaceKey: "ops.inquiry", assigneeUsername: parsed.data.assigneeUsername },
-    });
+      const obj = toObject(rows[0]?.data);
+      if (!obj) return NextResponse.json({ error: "数据格式错误" }, { status: 500 });
 
-    return NextResponse.json({ ok: true });
+      const recordOwner = String(obj["询价负责人"] ?? "").trim();
+      const isRecordOwner = Boolean(currentUsername && recordOwner && recordOwner === currentUsername);
+      if (!isAdmin && !isOwnerRole && !isRecordOwner) return NextResponse.json({ error: "无权限" }, { status: 403 });
+
+      const next: Record<string, unknown> = { ...obj };
+      next["询价人"] = parsed.data.assigneeUsername;
+      next["最后更新时间"] = now;
+
+      await pool.query<ResultSetHeader>("UPDATE workspace_records SET data = CAST(? AS JSON) WHERE id = ?", [
+        JSON.stringify(next),
+        parsed.data.recordId,
+      ]);
+
+      await logOperation({
+        req,
+        actorUserId: session.user.id,
+        action: "inquiry.assign",
+        targetType: "workspace_record",
+        targetId: String(parsed.data.recordId),
+        detail: { workspaceKey: "ops.inquiry", assigneeUsername: parsed.data.assigneeUsername },
+      });
+
+      return NextResponse.json({ ok: true });
+    }
+
+    const recordIds = Array.from(new Set(parsed.data.recordIds));
+    const [rows] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
+      "SELECT id, data FROM workspace_records WHERE id IN (?) AND workspace_key = ? AND deleted_at IS NULL",
+      [recordIds, "ops.purchase"],
+    );
+    if (rows.length !== recordIds.length) return NextResponse.json({ error: "部分记录不存在" }, { status: 404 });
+
+    if (!isAdmin && !isOwnerRole) {
+      if (!currentUsername) return NextResponse.json({ error: "无权限" }, { status: 403 });
+      for (const r of rows) {
+        const obj = toObject(r.data);
+        if (!obj) return NextResponse.json({ error: "数据格式错误" }, { status: 500 });
+        const recordOwner = String(obj["询价负责人"] ?? "").trim();
+        if (!recordOwner || recordOwner !== currentUsername) return NextResponse.json({ error: "无权限" }, { status: 403 });
+      }
+    }
+
+    const [updated] = await pool.query<ResultSetHeader>(
+      `
+        UPDATE workspace_records
+        SET data = JSON_SET(data, '$."询价人"', ?, '$."最后更新时间"', ?)
+        WHERE id IN (?)
+          AND workspace_key = ?
+          AND deleted_at IS NULL
+      `,
+      [parsed.data.assigneeUsername, now, recordIds, "ops.purchase"],
+    );
+
+    for (const id of recordIds) {
+      await logOperation({
+        req,
+        actorUserId: session.user.id,
+        action: "inquiry.assign",
+        targetType: "workspace_record",
+        targetId: String(id),
+        detail: {
+          workspaceKey: "ops.inquiry",
+          assigneeUsername: parsed.data.assigneeUsername,
+          bulk: true,
+          count: recordIds.length,
+        },
+      });
+    }
+
+    return NextResponse.json({ ok: true, affectedRows: updated.affectedRows });
   } catch (err) {
     const r = getDbErrorResponse(err);
     return NextResponse.json({ error: r.error }, { status: r.status });
