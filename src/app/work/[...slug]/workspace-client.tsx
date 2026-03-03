@@ -162,7 +162,7 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
 ]);
 
 const PURCHASE_PRODUCT_SIZE_FIELDS = ["产品尺寸-长（厘米）", "产品尺寸-宽（厘米）", "产品尺寸-高（厘米）"] as const;
-const WORKSPACE_TABLE_HIDDEN_FIELDS = new Set(["产品链接×"]);
+const WORKSPACE_TABLE_HIDDEN_FIELDS = new Set(["产品链接×", "运营人员", "创建时间", "最后更新时间"]);
 const PURCHASE_TABLE_HIDDEN_FIELDS = new Set([
   "选品人",
   "询价分配人｜选品",
@@ -706,6 +706,7 @@ export function WorkspaceClient({
   const pendingEditFocus = useRef<{ key: string; selectionStart: number | null; selectionEnd: number | null } | null>(
     null,
   );
+  const [imageViewer, setImageViewer] = useState<{ urls: string[]; index: number } | null>(null);
 
   const [editing, setEditing] = useState<{ id: number | null; data: Record<string, string> } | null>(
     null,
@@ -716,6 +717,8 @@ export function WorkspaceClient({
   const [inquiryForm, setInquiryForm] = useState<{
     productName: string;
     category: string;
+    productImages: string;
+    referenceLinks: string;
     productUnitPrice: string;
     moq: string;
     discountPolicy: "" | "有" | "无";
@@ -731,6 +734,8 @@ export function WorkspaceClient({
   }>({
     productName: "",
     category: "",
+    productImages: "",
+    referenceLinks: "",
     productUnitPrice: "",
     moq: "",
     discountPolicy: "",
@@ -790,6 +795,38 @@ export function WorkspaceClient({
   const [inquiryBulkAssignOpen, setInquiryBulkAssignOpen] = useState(false);
   const [inquiryBulkAssignPerson, setInquiryBulkAssignPerson] = useState("");
   const [inquiryBulkAssignSaving, setInquiryBulkAssignSaving] = useState(false);
+  const [inquiryBulkEditOpen, setInquiryBulkEditOpen] = useState(false);
+  const [inquiryBulkEditUnits, setInquiryBulkEditUnits] = useState<"cmkg" | "inlb">("cmkg");
+  const [inquiryBulkEditSaving, setInquiryBulkEditSaving] = useState(false);
+  const [inquiryBulkEditIds, setInquiryBulkEditIds] = useState<number[]>([]);
+  const [inquiryBulkEditSpecs, setInquiryBulkEditSpecs] = useState<string[]>([]);
+  const [inquiryBulkEditForm, setInquiryBulkEditForm] = useState<{
+    productUnitPrice: string;
+    moq: string;
+    discountPolicy: "" | "有" | "无";
+    discountNote: string;
+    packageLengthCm: string;
+    packageWidthCm: string;
+    packageHeightCm: string;
+    packageWeightKg: string;
+    mainProcess: string;
+    factoryLocation: string;
+    factoryContact: string;
+    factoryPhone: string;
+  }>({
+    productUnitPrice: "",
+    moq: "",
+    discountPolicy: "",
+    discountNote: "",
+    packageLengthCm: "",
+    packageWidthCm: "",
+    packageHeightCm: "",
+    packageWeightKg: "",
+    mainProcess: "",
+    factoryLocation: "",
+    factoryContact: "",
+    factoryPhone: "",
+  });
   const [inquirySelectedIds, setInquirySelectedIds] = useState<Set<number>>(() => new Set());
 
   const operatorName = useMemo(() => {
@@ -809,6 +846,8 @@ export function WorkspaceClient({
     setInquiryForm({
       productName: "",
       category: "",
+      productImages: "",
+      referenceLinks: "",
       productUnitPrice: "",
       moq: "",
       discountPolicy: "",
@@ -851,6 +890,25 @@ export function WorkspaceClient({
     setInquiryBulkAssignOpen(false);
     setInquiryBulkAssignPerson("");
     setInquiryBulkAssignSaving(false);
+    setInquiryBulkEditOpen(false);
+    setInquiryBulkEditUnits("cmkg");
+    setInquiryBulkEditSaving(false);
+    setInquiryBulkEditIds([]);
+    setInquiryBulkEditSpecs([]);
+    setInquiryBulkEditForm({
+      productUnitPrice: "",
+      moq: "",
+      discountPolicy: "",
+      discountNote: "",
+      packageLengthCm: "",
+      packageWidthCm: "",
+      packageHeightCm: "",
+      packageWeightKg: "",
+      mainProcess: "",
+      factoryLocation: "",
+      factoryContact: "",
+      factoryPhone: "",
+    });
     setInquirySelectedIds(new Set());
     setUploadingField(null);
     setImageIndexByField({});
@@ -1053,6 +1111,8 @@ export function WorkspaceClient({
     setInquiryForm({
       productName: (filters["名称"] ?? "").trim(),
       category: "",
+      productImages: "",
+      referenceLinks: "",
       productUnitPrice: "",
       moq: "",
       discountPolicy: "",
@@ -1084,6 +1144,8 @@ export function WorkspaceClient({
 
       const data: Record<string, unknown> = {
         名称: inquiryForm.productName,
+        产品图片: inquiryForm.productImages,
+        参考链接: inquiryForm.referenceLinks,
         "包裹尺寸-长（厘米）": inquiryForm.packageLengthCm,
         "包裹尺寸-宽（厘米）": inquiryForm.packageWidthCm,
         "包裹尺寸-高（厘米）": inquiryForm.packageHeightCm,
@@ -1094,6 +1156,8 @@ export function WorkspaceClient({
         联系人电话: inquiryForm.factoryPhone,
         状态: resolvedStatus,
       };
+      if (!String(inquiryForm.productImages ?? "").trim()) delete data["产品图片"];
+      if (!String(inquiryForm.referenceLinks ?? "").trim()) delete data["参考链接"];
       if (category) data["所属类目"] = category;
       if (unitPrice) data["产品单价"] = unitPrice;
       if (moq) data["起订量"] = moq;
@@ -1237,9 +1301,61 @@ export function WorkspaceClient({
     setInquiryAssignOpen(false);
     setInquiryAssignRecordId(null);
     setInquiryAssignPerson("");
+    setInquiryBulkEditOpen(false);
+    setInquiryBulkEditIds([]);
+    setInquiryBulkEditSpecs([]);
     setInquiryBulkAssignSaving(false);
     setInquiryBulkAssignOpen(true);
     void ensureInquiryAssigneesLoaded();
+  }
+
+  function openInquiryBulkEdit() {
+    if (workspaceKey !== "ops.inquiry") return;
+    if (inquirySelectedIds.size === 0) return;
+    const ids = Array.from(inquirySelectedIds);
+    setEditing(null);
+    setInquiryCreateOpen(false);
+    setInquiryAssignOpen(false);
+    setInquiryAssignRecordId(null);
+    setInquiryAssignPerson("");
+    setInquiryBulkAssignOpen(false);
+    setInquiryBulkAssignPerson("");
+    setInquiryBulkEditSaving(false);
+    setInquiryBulkEditUnits("cmkg");
+    setInquiryBulkEditForm({
+      productUnitPrice: "",
+      moq: "",
+      discountPolicy: "",
+      discountNote: "",
+      packageLengthCm: "",
+      packageWidthCm: "",
+      packageHeightCm: "",
+      packageWeightKg: "",
+      mainProcess: "",
+      factoryLocation: "",
+      factoryContact: "",
+      factoryPhone: "",
+    });
+    setInquiryBulkEditIds(ids);
+    setInquiryBulkEditSpecs(() => {
+      const selected = records.filter((r) => inquirySelectedIds.has(r.id));
+      const out: string[] = [];
+      const seen = new Set<string>();
+      for (const r of selected) {
+        const obj = toRecordStringUnknown(r.data);
+        const raw = String(obj["产品规格"] ?? "");
+        const parts = parseDelimitedValues(raw);
+        for (const p of parts) {
+          const t = p.trim();
+          if (!t) continue;
+          if (seen.has(t)) continue;
+          seen.add(t);
+          out.push(t);
+        }
+      }
+      return out;
+    });
+    setInquiryBulkEditOpen(true);
   }
 
   async function saveInquiryBulkAssign() {
@@ -1275,6 +1391,122 @@ export function WorkspaceClient({
     }
   }
 
+  async function saveInquiryBulkEdit() {
+    if (inquiryBulkEditSaving) return;
+    if (workspaceKey !== "ops.inquiry") return;
+    const ids = inquiryBulkEditIds.length > 0 ? inquiryBulkEditIds : Array.from(inquirySelectedIds);
+    if (ids.length === 0) return;
+    const selected = records.filter((r) => ids.includes(r.id));
+    if (selected.length === 0) return;
+
+    const unitPrice = inquiryBulkEditForm.productUnitPrice.trim();
+    const moq = inquiryBulkEditForm.moq.trim();
+    const discountPolicy = inquiryBulkEditForm.discountPolicy.trim();
+    const discountNote = inquiryBulkEditForm.discountNote.trim();
+    const packageLengthCm = inquiryBulkEditForm.packageLengthCm.trim();
+    const packageWidthCm = inquiryBulkEditForm.packageWidthCm.trim();
+    const packageHeightCm = inquiryBulkEditForm.packageHeightCm.trim();
+    const packageWeightKg = inquiryBulkEditForm.packageWeightKg.trim();
+    const mainProcess = inquiryBulkEditForm.mainProcess.trim();
+    const factoryLocation = inquiryBulkEditForm.factoryLocation.trim();
+    const factoryContact = inquiryBulkEditForm.factoryContact.trim();
+    const factoryPhone = inquiryBulkEditForm.factoryPhone.trim();
+
+    const hasAnyChange =
+      !!unitPrice ||
+      !!moq ||
+      !!discountPolicy ||
+      (discountPolicy === "有" && !!discountNote) ||
+      !!packageLengthCm ||
+      !!packageWidthCm ||
+      !!packageHeightCm ||
+      !!packageWeightKg ||
+      !!mainProcess ||
+      !!factoryLocation ||
+      !!factoryContact ||
+      !!factoryPhone;
+
+    if (!hasAnyChange) {
+      alert("请先填写需要批量修改的字段（留空表示不修改）");
+      return;
+    }
+
+    setInquiryBulkEditSaving(true);
+    try {
+      for (const row of selected) {
+        const obj = toRecordStringUnknown(row.data);
+        const nextData: Record<string, unknown> = { ...obj };
+
+        if (unitPrice) nextData["产品单价"] = unitPrice;
+        if (moq) nextData["起订量"] = moq;
+        if (packageLengthCm) nextData["包裹尺寸-长（厘米）"] = packageLengthCm;
+        if (packageWidthCm) nextData["包裹尺寸-宽（厘米）"] = packageWidthCm;
+        if (packageHeightCm) nextData["包裹尺寸-高（厘米）"] = packageHeightCm;
+        if (packageWeightKg) nextData["包裹实重（公斤）"] = packageWeightKg;
+        if (mainProcess) nextData["主要工艺"] = mainProcess;
+        if (factoryLocation) nextData["工厂所在地"] = factoryLocation;
+        if (factoryContact) nextData["工厂联系人"] = factoryContact;
+        if (factoryPhone) nextData["联系人电话"] = factoryPhone;
+
+        if (discountPolicy) {
+          nextData["优惠政策"] = discountPolicy;
+          if (discountPolicy === "有") {
+            if (discountNote) nextData["优惠政策备注"] = discountNote;
+          } else {
+            nextData["优惠政策备注"] = "";
+          }
+        }
+
+        const res = await fetch(`/api/workspace/${encodeURIComponent("ops.purchase")}/records/${row.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: nextData }),
+        });
+        if (!res.ok) {
+          const json = await res.json().catch(() => ({}));
+          const err =
+            json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+          alert(typeof err === "string" && err.trim() ? err : `ID ${row.id} 修改失败`);
+          return;
+        }
+      }
+
+      setInquiryBulkEditOpen(false);
+      setInquiryBulkEditSaving(false);
+      setInquiryBulkEditIds([]);
+      setInquiryBulkEditSpecs([]);
+      setInquiryBulkEditForm({
+        productUnitPrice: "",
+        moq: "",
+        discountPolicy: "",
+        discountNote: "",
+        packageLengthCm: "",
+        packageWidthCm: "",
+        packageHeightCm: "",
+        packageWeightKg: "",
+        mainProcess: "",
+        factoryLocation: "",
+        factoryContact: "",
+        factoryPhone: "",
+      });
+      setInquirySelectedIds(new Set());
+      await load();
+    } finally {
+      setInquiryBulkEditSaving(false);
+    }
+  }
+
+  function openImageViewer(urls: string[], index = 0) {
+    const clean = urls.filter(looksLikeImagePath);
+    if (clean.length === 0) return;
+    const nextIndex = Math.max(0, Math.min(clean.length - 1, index));
+    setImageViewer({ urls: clean, index: nextIndex });
+  }
+
+  function closeImageViewer() {
+    setImageViewer(null);
+  }
+
   function openEdit(row: RecordRow) {
     if (workspaceKey === "ops.inquiry") {
       const obj = toRecordStringUnknown(row.data);
@@ -1285,6 +1517,8 @@ export function WorkspaceClient({
       setInquiryForm({
         productName: String(obj["名称"] ?? ""),
         category: String(obj["所属类目"] ?? ""),
+        productImages: String(obj["产品图片"] ?? ""),
+        referenceLinks: String(obj["参考链接"] ?? ""),
         productUnitPrice: String(obj["产品单价"] ?? ""),
         moq: String(obj["起订量"] ?? ""),
         discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
@@ -1397,6 +1631,7 @@ export function WorkspaceClient({
     for (const f of visibleFields) {
       if (f === "创建时间" || f === "最后更新时间") continue;
       if (f === "运营人员") continue;
+      if (f === "产品规格输入方式") continue;
       const rawValue = f === "参考链接" && referenceLinksOverride != null ? referenceLinksOverride : (editing.data[f] ?? "");
       const v = String(rawValue).trim();
       const kind = getFieldKind(f);
@@ -1429,6 +1664,7 @@ export function WorkspaceClient({
     if (!editing.id && schema.fields.includes("创建时间")) payload["创建时间"] = formatNow();
     if (schema.fields.includes("最后更新时间")) payload["最后更新时间"] = editing.id ? formatNow() : null;
     if (referenceLinksOverride != null) payload["参考链接"] = referenceLinksOverride;
+    delete payload["产品规格输入方式"];
 
     if (schema.fields.includes("产品规则") && schema.fields.includes("产品规格")) {
       const rawSpecs =
@@ -1723,6 +1959,16 @@ export function WorkspaceClient({
                       批量分配询价人{inquirySelectedIds.size > 0 ? `（${inquirySelectedIds.size}）` : ""}
                     </button>
                   ) : null}
+                  {workspaceKey === "ops.inquiry" ? (
+                    <button
+                      type="button"
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2 disabled:opacity-50"
+                      disabled={inquirySelectedIds.size === 0}
+                      onClick={openInquiryBulkEdit}
+                    >
+                      批量修改数据{inquirySelectedIds.size > 0 ? `（${inquirySelectedIds.size}）` : ""}
+                    </button>
+                  ) : null}
                 </div>
                 <button
                   type="button"
@@ -1841,14 +2087,12 @@ export function WorkspaceClient({
                                   {kind === "image" && firstImageUrl && looksLikeImagePath(firstImageUrl) ? (
                                     <a
                                       href={firstImageUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-2 text-foreground"
+                                      className="inline-flex cursor-pointer items-center gap-2 text-foreground"
                                       title={imageUrls.join("\n")}
                                       onClick={(e) => {
                                         e.preventDefault();
                                         e.stopPropagation();
-                                        window.open(firstImageUrl, "_blank", "noopener,noreferrer");
+                                        openImageViewer(imageUrls, 0);
                                       }}
                                     >
                                       <Image
@@ -1856,9 +2100,9 @@ export function WorkspaceClient({
                                         alt={displayFieldLabel(f)}
                                         width={40}
                                         height={40}
-                                        className="h-10 w-10 rounded-lg border border-border bg-surface-2 object-cover"
+                                        className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-surface-2 object-cover"
                                       />
-                                      <span className="text-xs underline">
+                                      <span className="cursor-pointer text-xs underline">
                                         {imageUrls.length > 1 ? `查看（${imageUrls.length}）` : "查看"}
                                       </span>
                                     </a>
@@ -1963,6 +2207,83 @@ export function WorkspaceClient({
         </div>
       </div>
 
+      {imageViewer ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-5xl rounded-xl border border-border bg-surface p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium">{`图片预览（${imageViewer.index + 1}/${imageViewer.urls.length}）`}</div>
+              <button
+                type="button"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                title="关闭"
+                onClick={closeImageViewer}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                disabled={imageViewer.index <= 0}
+                onClick={() =>
+                  setImageViewer((prev) => (prev ? { ...prev, index: Math.max(0, prev.index - 1) } : prev))
+                }
+                aria-label="上一张"
+              >
+                ‹
+              </button>
+
+              <div className="flex-1 overflow-hidden rounded-lg border border-border bg-surface-2">
+                <div className="flex h-[60vh] items-center justify-center">
+                  <Image
+                    src={imageViewer.urls[imageViewer.index] ?? ""}
+                    alt="图片预览"
+                    width={1400}
+                    height={900}
+                    className="h-[60vh] w-full object-contain"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                disabled={imageViewer.index >= imageViewer.urls.length - 1}
+                onClick={() =>
+                  setImageViewer((prev) =>
+                    prev ? { ...prev, index: Math.min(prev.urls.length - 1, prev.index + 1) } : prev,
+                  )
+                }
+                aria-label="下一张"
+              >
+                ›
+              </button>
+            </div>
+
+            {imageViewer.urls.length > 1 ? (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {imageViewer.urls.map((u, idx) => (
+                  <button
+                    key={`${u}-${idx}`}
+                    type="button"
+                    className={[
+                      "overflow-hidden rounded-lg border bg-surface p-0",
+                      idx === imageViewer.index ? "border-primary" : "border-border hover:bg-surface-2",
+                    ].join(" ")}
+                    onClick={() => setImageViewer((prev) => (prev ? { ...prev, index: idx } : prev))}
+                    aria-label={`查看第 ${idx + 1} 张`}
+                  >
+                    <Image src={u} alt={`缩略图 ${idx + 1}`} width={64} height={64} className="h-16 w-16 object-cover" />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
       {inquiryCreateOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-3xl rounded-xl border border-border bg-surface p-4">
@@ -1993,8 +2314,8 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">商品名称</div>
                       <input
                         value={inquiryForm.productName}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, productName: e.target.value }))}
-                        className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                        readOnly
+                        className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
                       />
                     </div>
                     <div className="flex flex-col gap-1">
@@ -2002,15 +2323,76 @@ export function WorkspaceClient({
                       <input
                         list="inquiry-category-options"
                         value={inquiryForm.category}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, category: e.target.value }))}
-                        className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                        placeholder="请选择或输入"
+                        readOnly
+                        className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                        placeholder="—"
                       />
                       <datalist id="inquiry-category-options">
                         {categories.map((name) => (
                           <option key={name} value={name} />
                         ))}
                       </datalist>
+                    </div>
+                    <div className="flex flex-col gap-1 sm:col-span-2">
+                      <div className="text-xs text-muted">产品图片</div>
+                      {(() => {
+                        const urls = parseImageUrls(inquiryForm.productImages);
+                        const first = urls[0] ?? "";
+                        if (!first || !looksLikeImagePath(first)) {
+                          return (
+                            <div className="flex h-10 items-center rounded-lg border border-border bg-surface px-3 text-sm text-muted opacity-70">
+                              —
+                            </div>
+                          );
+                        }
+                        return (
+                          <button
+                            type="button"
+                            className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm text-foreground hover:bg-surface-2"
+                            onClick={() => openImageViewer(urls, 0)}
+                          >
+                            <Image
+                              src={first}
+                              alt="产品图片"
+                              width={32}
+                              height={32}
+                              className="h-8 w-8 cursor-pointer rounded border border-border bg-surface-2 object-cover"
+                            />
+                            <span className="cursor-pointer text-xs underline">
+                              {urls.length > 1 ? `查看（${urls.length}）` : "查看"}
+                            </span>
+                          </button>
+                        );
+                      })()}
+                    </div>
+                    <div className="flex flex-col gap-1 sm:col-span-2">
+                      <div className="text-xs text-muted">参考链接</div>
+                      {(() => {
+                        const urlList = parseDelimitedValues(inquiryForm.referenceLinks).filter(looksLikeUrl);
+                        if (urlList.length === 0) {
+                          return (
+                            <div className="flex h-10 items-center rounded-lg border border-border bg-surface px-3 text-sm text-muted opacity-70">
+                              —
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+                            {urlList.map((u, idx) => (
+                              <a
+                                key={`${u}-${idx}`}
+                                className="text-foreground underline"
+                                href={u}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={u}
+                              >
+                                {urlList.length > 1 ? `链接${idx + 1}` : "链接"}
+                              </a>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2617,6 +2999,376 @@ export function WorkspaceClient({
         </EditModalShell>
       ) : null}
 
+      {inquiryBulkEditOpen ? (
+        <EditModalShell
+          title={`批量修改数据（${(inquiryBulkEditIds.length || inquirySelectedIds.size).toString()}条）`}
+          dataEditModal="inquiry-bulk-edit"
+          onClose={() => {
+            setInquiryBulkEditOpen(false);
+            setInquiryBulkEditIds([]);
+            setInquiryBulkEditSpecs([]);
+            setInquiryBulkEditForm({
+              productUnitPrice: "",
+              moq: "",
+              discountPolicy: "",
+              discountNote: "",
+              packageLengthCm: "",
+              packageWidthCm: "",
+              packageHeightCm: "",
+              packageWeightKg: "",
+              mainProcess: "",
+              factoryLocation: "",
+              factoryContact: "",
+              factoryPhone: "",
+            });
+          }}
+        >
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-3">
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">已选择记录</div>
+                <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">
+                  {(() => {
+                    const selected = records.filter((r) => inquirySelectedIds.has(r.id));
+                    if (selected.length === 0) return <div className="py-1">暂无选择</div>;
+                    return (
+                      <ul className="list-disc pl-5">
+                        {selected.map((r) => {
+                          const obj = toRecordStringUnknown(r.data);
+                          const name = String(obj["名称"] ?? "").trim();
+                          const cat = String(obj["所属类目"] ?? "").trim();
+                          return (
+                            <li key={r.id} className="py-1">
+                              <span>ID：{r.id}</span>
+                              {name ? <span>，名称：{name}</span> : null}
+                              {cat ? <span>，所属类目：{cat}</span> : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
+                </div>
+                <div className="mt-2 text-xs text-muted">留空表示不修改</div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">基本信息</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value="—"
+                      readOnly
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <input
+                      value="—"
+                      readOnly
+                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <div className="text-xs text-muted">产品规格</div>
+                    {inquiryBulkEditSpecs.length > 0 ? (
+                      <div className="flex flex-col gap-2">
+                        {inquiryBulkEditSpecs.map((it, idx) => (
+                          <input
+                            key={`${it}-${idx}`}
+                            value={it}
+                            readOnly
+                            className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="flex h-9 items-center rounded-lg border border-border bg-surface px-3 text-sm text-muted opacity-70">
+                        —
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-sm font-medium">包裹参数</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className={[
+                        "inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs",
+                        inquiryBulkEditUnits === "cmkg"
+                          ? "border-primary bg-surface text-primary"
+                          : "border-border bg-surface hover:bg-surface-2 text-muted",
+                      ].join(" ")}
+                      onClick={() => setInquiryBulkEditUnits("cmkg")}
+                    >
+                      cm/kg
+                    </button>
+                    <button
+                      type="button"
+                      className={[
+                        "inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs",
+                        inquiryBulkEditUnits === "inlb"
+                          ? "border-primary bg-surface text-primary"
+                          : "border-border bg-surface hover:bg-surface-2 text-muted",
+                      ].join(" ")}
+                      onClick={() => setInquiryBulkEditUnits("inlb")}
+                    >
+                      英寸/英镑
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-3 grid gap-3">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">包裹尺寸（长 / 宽 / 高，{inquiryBulkEditUnits === "cmkg" ? "cm" : "in"}）</div>
+                    <div className="flex gap-2">
+                      <input
+                        inputMode="decimal"
+                        value={
+                          inquiryBulkEditUnits === "cmkg"
+                            ? inquiryBulkEditForm.packageLengthCm
+                            : (cmToInchesValue(inquiryBulkEditForm.packageLengthCm) ?? "")
+                        }
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setInquiryBulkEditForm((prev) => {
+                            if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageLengthCm: next };
+                            const t = next.trim();
+                            if (!t) return { ...prev, packageLengthCm: "" };
+                            const cm = inchesToCmValue(next);
+                            if (cm == null) return prev;
+                            return { ...prev, packageLengthCm: cm };
+                          });
+                        }}
+                        placeholder="留空不修改"
+                        className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      />
+                      <input
+                        inputMode="decimal"
+                        value={
+                          inquiryBulkEditUnits === "cmkg"
+                            ? inquiryBulkEditForm.packageWidthCm
+                            : (cmToInchesValue(inquiryBulkEditForm.packageWidthCm) ?? "")
+                        }
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setInquiryBulkEditForm((prev) => {
+                            if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageWidthCm: next };
+                            const t = next.trim();
+                            if (!t) return { ...prev, packageWidthCm: "" };
+                            const cm = inchesToCmValue(next);
+                            if (cm == null) return prev;
+                            return { ...prev, packageWidthCm: cm };
+                          });
+                        }}
+                        placeholder="留空不修改"
+                        className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      />
+                      <input
+                        inputMode="decimal"
+                        value={
+                          inquiryBulkEditUnits === "cmkg"
+                            ? inquiryBulkEditForm.packageHeightCm
+                            : (cmToInchesValue(inquiryBulkEditForm.packageHeightCm) ?? "")
+                        }
+                        onChange={(e) => {
+                          const next = e.target.value;
+                          setInquiryBulkEditForm((prev) => {
+                            if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageHeightCm: next };
+                            const t = next.trim();
+                            if (!t) return { ...prev, packageHeightCm: "" };
+                            const cm = inchesToCmValue(next);
+                            if (cm == null) return prev;
+                            return { ...prev, packageHeightCm: cm };
+                          });
+                        }}
+                        placeholder="留空不修改"
+                        className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">包裹重量（{inquiryBulkEditUnits === "cmkg" ? "kg" : "lb"}）</div>
+                    <input
+                      inputMode="decimal"
+                      value={
+                        inquiryBulkEditUnits === "cmkg"
+                          ? inquiryBulkEditForm.packageWeightKg
+                          : (kgToLbValue(inquiryBulkEditForm.packageWeightKg) ?? "")
+                      }
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setInquiryBulkEditForm((prev) => {
+                          if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageWeightKg: next };
+                          const t = next.trim();
+                          if (!t) return { ...prev, packageWeightKg: "" };
+                          const kg = lbToKgValue(next);
+                          if (kg == null) return prev;
+                          return { ...prev, packageWeightKg: kg };
+                        });
+                      }}
+                      placeholder="留空不修改"
+                      className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">商务信息</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">产品单价</div>
+                    <input
+                      inputMode="decimal"
+                      value={inquiryBulkEditForm.productUnitPrice}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, productUnitPrice: e.target.value }))}
+                      placeholder="留空不修改"
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">起订量</div>
+                    <input
+                      inputMode="numeric"
+                      value={inquiryBulkEditForm.moq}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, moq: e.target.value }))}
+                      placeholder="留空不修改"
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">优惠政策</div>
+                    <select
+                      value={inquiryBulkEditForm.discountPolicy}
+                      onChange={(e) => {
+                        const next = (e.target.value as "" | "有" | "无") || "";
+                        setInquiryBulkEditForm((prev) => ({
+                          ...prev,
+                          discountPolicy: next,
+                          discountNote: next === "有" ? prev.discountNote : "",
+                        }));
+                      }}
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    >
+                      <option value="">不修改</option>
+                      <option value="有">有</option>
+                      <option value="无">无</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1 sm:col-span-2">
+                    <div className="text-xs text-muted">优惠备注</div>
+                    <textarea
+                      value={inquiryBulkEditForm.discountNote}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, discountNote: e.target.value }))}
+                      rows={3}
+                      disabled={inquiryBulkEditForm.discountPolicy !== "有"}
+                      placeholder={inquiryBulkEditForm.discountPolicy === "有" ? "留空不修改" : "仅在选择“有”时可填"}
+                      className={[
+                        "w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none",
+                        inquiryBulkEditForm.discountPolicy !== "有" ? "cursor-not-allowed opacity-70" : "",
+                      ].join(" ")}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">工厂信息</div>
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">主要工艺</div>
+                    <select
+                      value={inquiryBulkEditForm.mainProcess}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, mainProcess: e.target.value }))}
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    >
+                      <option value="">不修改</option>
+                      {MAIN_PROCESS_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {opt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">工厂所在地</div>
+                    <input
+                      value={inquiryBulkEditForm.factoryLocation}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, factoryLocation: e.target.value }))}
+                      placeholder="留空不修改"
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">联系人</div>
+                    <input
+                      value={inquiryBulkEditForm.factoryContact}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, factoryContact: e.target.value }))}
+                      placeholder="留空不修改"
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">联系人电话</div>
+                    <input
+                      value={inquiryBulkEditForm.factoryPhone}
+                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, factoryPhone: e.target.value }))}
+                      placeholder="留空不修改"
+                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setInquiryBulkEditOpen(false);
+                setInquiryBulkEditIds([]);
+                setInquiryBulkEditSpecs([]);
+                setInquiryBulkEditForm({
+                  productUnitPrice: "",
+                  moq: "",
+                  discountPolicy: "",
+                  discountNote: "",
+                  packageLengthCm: "",
+                  packageWidthCm: "",
+                  packageHeightCm: "",
+                  packageWeightKg: "",
+                  mainProcess: "",
+                  factoryLocation: "",
+                  factoryContact: "",
+                  factoryPhone: "",
+                });
+              }}
+              disabled={inquiryBulkEditSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
+              onClick={saveInquiryBulkEdit}
+              disabled={inquiryBulkEditSaving}
+            >
+              {inquiryBulkEditSaving ? "提交中…" : "确认修改"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
       {editing ? (
         (() => {
           const body = (
@@ -2684,41 +3436,11 @@ export function WorkspaceClient({
                     const useRowLayout = isPurchaseFlow && !opts?.hideLabel && kind !== "image";
                     if (f === "状态") return null;
                     if (f === "产品规格" && schema.fields.includes("产品规格输入方式")) {
-                      const modeField = "产品规格输入方式";
-                      const modeRaw = (editing.data[modeField] ?? "").trim();
-                      const mode = modeRaw === "合并输入" ? "合并输入" : "分开输入";
                       const list =
                         linkDraftByField[f] ?? (() => {
                           const parsed = parseDelimitedValues(value);
                           return parsed.length > 0 ? parsed : [""];
                         })();
-                      const radioName = `spec-input-mode-${editing.id ?? "new"}`;
-
-                      const setMode = (next: "分开输入" | "合并输入") => {
-                        setEditing((prev) => {
-                          if (!prev) return prev;
-                          const nextData: Record<string, string> = {
-                            ...prev.data,
-                            [modeField]: next,
-                          };
-                          return { ...prev, data: applyComputedFields(schema, nextData) };
-                        });
-
-                        if (next === "分开输入") {
-                          const parsed = parseDelimitedValues(value);
-                          setLinkDraftByField((prev) => ({ ...prev, [f]: parsed.length > 0 ? parsed : [""] }));
-                        } else {
-                          setLinkDraftByField((prev) => ({ ...prev, [f]: list.length > 0 ? list : [""] }));
-                          setEditing((prev) => {
-                            if (!prev) return prev;
-                            const nextData: Record<string, string> = {
-                              ...prev.data,
-                              [f]: joinDelimitedValues(list),
-                            };
-                            return { ...prev, data: applyComputedFields(schema, nextData) };
-                          });
-                        }
-                      };
 
                       const rowClassName = useRowLayout
                         ? "flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3"
@@ -2745,14 +3467,23 @@ export function WorkspaceClient({
                             )}
 
                             <div className={contentClassName}>
-                              {mode === "分开输入" ? (
-                                <div className="flex flex-col gap-2">
-                                  {list.map((it, idx) => (
+                              <div className="flex flex-col gap-2">
+                                {list.map((it, idx) => {
+                                  const inputKey = `${focusKey}__spec-${idx}`;
+                                  return (
                                     <div key={idx} className="flex items-center gap-2">
                                       <input
+                                        ref={(el) => {
+                                          editFieldRefs.current[inputKey] = el;
+                                        }}
                                         type="text"
                                         value={it}
                                         onChange={(e) => {
+                                          pendingEditFocus.current = {
+                                            key: inputKey,
+                                            selectionStart: e.currentTarget.selectionStart,
+                                            selectionEnd: e.currentTarget.selectionEnd,
+                                          };
                                           const nextList = list.map((v, i) => (i === idx ? e.target.value : v));
                                           setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
                                           setValue(joinDelimitedValues(nextList));
@@ -2773,64 +3504,19 @@ export function WorkspaceClient({
                                         删除
                                       </button>
                                     </div>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
-                                    onClick={() => {
-                                      const nextList = [...list, ""];
-                                      setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
-                                      setValue(joinDelimitedValues(nextList));
-                                    }}
-                                  >
-                                    + 添加规格
-                                  </button>
-                                </div>
-                              ) : (
-                                <textarea
-                                  value={value}
-                                  onChange={(e) => {
-                                    const nextValue = e.target.value;
-                                    setValue(nextValue);
-                                    const parsed = parseDelimitedValues(nextValue);
-                                    setLinkDraftByField((prev) => ({ ...prev, [f]: parsed.length > 0 ? parsed : [""] }));
+                                  );
+                                })}
+                                <button
+                                  type="button"
+                                  className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                  onClick={() => {
+                                    const nextList = [...list, ""];
+                                    setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
+                                    setValue(joinDelimitedValues(nextList));
                                   }}
-                                  rows={4}
-                                  placeholder="请输入规格（可用逗号或换行分隔）"
-                                  className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
-                                />
-                              )}
-                            </div>
-                          </div>
-
-                          <div className={rowClassName}>
-                            {opts?.hideLabel ? null : (
-                              <div className={labelClassName}>
-                                <div className="min-w-0 flex-1 truncate">录入方式</div>
-                              </div>
-                            )}
-                            <div className={contentClassName}>
-                              <div className="flex items-center gap-4 text-sm">
-                                <label className="flex items-center gap-2">
-                                  <input
-                                    type="radio"
-                                    name={radioName}
-                                    value="split"
-                                    checked={mode === "分开输入"}
-                                    onChange={() => setMode("分开输入")}
-                                  />
-                                  <span>分开输入</span>
-                                </label>
-                                <label className="flex items-center gap-2">
-                                  <input
-                                    type="radio"
-                                    name={radioName}
-                                    value="merge"
-                                    checked={mode === "合并输入"}
-                                    onChange={() => setMode("合并输入")}
-                                  />
-                                  <span>合并输入</span>
-                                </label>
+                                >
+                                  + 添加规格
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -3095,57 +3781,31 @@ export function WorkspaceClient({
                         ) : f === "产品规格" ? (
                           <div className={useRowLayout ? "min-w-0 sm:flex-1" : ""}>
                             {(() => {
-                              const modeField = "产品规格输入方式";
-                              const modeRaw = (schema.fields.includes(modeField) ? editing.data[modeField] : "") ?? "";
-                              const mode = modeRaw === "合并输入" ? "合并输入" : "分开输入";
                               const list =
-                                mode === "分开输入"
-                                  ? linkDraftByField[f] ?? (() => {
-                                      const parsed = parseDelimitedValues(value);
-                                      return parsed.length > 0 ? parsed : [""];
-                                    })()
-                                  : [];
-
-                              const setMode = (next: "分开输入" | "合并输入") => {
-                                setEditing((prev) => {
-                                  if (!prev) return prev;
-                                  const nextData: Record<string, string> = {
-                                    ...prev.data,
-                                    [modeField]: next,
-                                  };
-                                  return { ...prev, data: applyComputedFields(schema, nextData) };
-                                });
-
-                                if (next === "分开输入") {
-                                  const parsed = parseDelimitedValues(editing.data[f] ?? "");
-                                  setLinkDraftByField((prev) => ({ ...prev, [f]: parsed.length > 0 ? parsed : [""] }));
-                                } else {
-                                  const currentList =
-                                    linkDraftByField[f] ?? (() => {
-                                      const parsed = parseDelimitedValues(editing.data[f] ?? "");
-                                      return parsed.length > 0 ? parsed : [""];
-                                    })();
-                                  setEditing((prev) => {
-                                    if (!prev) return prev;
-                                    const nextData: Record<string, string> = {
-                                      ...prev.data,
-                                      [f]: joinDelimitedValues(currentList),
-                                    };
-                                    return { ...prev, data: applyComputedFields(schema, nextData) };
-                                  });
-                                }
-                              };
+                                linkDraftByField[f] ?? (() => {
+                                  const parsed = parseDelimitedValues(value);
+                                  return parsed.length > 0 ? parsed : [""];
+                                })();
 
                               return (
                                 <div className="flex flex-col gap-2">
-                                  {mode === "分开输入" ? (
-                                    <div className="flex flex-col gap-2">
-                                      {list.map((it, idx) => (
+                                  <div className="flex flex-col gap-2">
+                                    {list.map((it, idx) => {
+                                      const inputKey = `${focusKey}__spec-${idx}`;
+                                      return (
                                         <div key={idx} className="flex items-center gap-2">
                                           <input
+                                            ref={(el) => {
+                                              editFieldRefs.current[inputKey] = el;
+                                            }}
                                             type="text"
                                             value={it}
                                             onChange={(e) => {
+                                              pendingEditFocus.current = {
+                                                key: inputKey,
+                                                selectionStart: e.currentTarget.selectionStart,
+                                                selectionEnd: e.currentTarget.selectionEnd,
+                                              };
                                               const nextList = list.map((v, i) => (i === idx ? e.target.value : v));
                                               setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
                                               setValue(joinDelimitedValues(nextList));
@@ -3166,63 +3826,19 @@ export function WorkspaceClient({
                                             删除
                                           </button>
                                         </div>
-                                      ))}
-                                      <button
-                                        type="button"
-                                        className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
-                                        onClick={() => {
-                                          const nextList = [...list, ""];
-                                          setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
-                                          setValue(joinDelimitedValues(nextList));
-                                        }}
-                                      >
-                                        + 添加规格
-                                      </button>
-                                    </div>
-                                  ) : (
-                                    <textarea
-                                      value={value}
-                                      ref={(el) => {
-                                        editFieldRefs.current[focusKey] = el;
+                                      );
+                                    })}
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                      onClick={() => {
+                                        const nextList = [...list, ""];
+                                        setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
+                                        setValue(joinDelimitedValues(nextList));
                                       }}
-                                      onChange={(e) => {
-                                        pendingEditFocus.current = {
-                                          key: focusKey,
-                                          selectionStart: e.currentTarget.selectionStart,
-                                          selectionEnd: e.currentTarget.selectionEnd,
-                                        };
-                                        setValue(e.target.value);
-                                      }}
-                                      rows={4}
-                                      placeholder="请输入规格（可用逗号或换行分隔）"
-                                      className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
-                                    />
-                                  )}
-
-                                  <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-surface px-3 py-2">
-                                    <div className="text-xs text-muted">录入方式</div>
-                                    <div className="flex items-center gap-4 text-sm">
-                                      <label className="flex items-center gap-2">
-                                        <input
-                                          type="radio"
-                                          name="spec-input-mode"
-                                          value="split"
-                                          checked={mode === "分开输入"}
-                                          onChange={() => setMode("分开输入")}
-                                        />
-                                        <span>分开输入</span>
-                                      </label>
-                                      <label className="flex items-center gap-2">
-                                        <input
-                                          type="radio"
-                                          name="spec-input-mode"
-                                          value="merge"
-                                          checked={mode === "合并输入"}
-                                          onChange={() => setMode("合并输入")}
-                                        />
-                                        <span>合并输入</span>
-                                      </label>
-                                    </div>
+                                    >
+                                      + 添加规格
+                                    </button>
                                   </div>
                                 </div>
                               );
