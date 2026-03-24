@@ -6,6 +6,7 @@ declare module "next-auth" {
     username: string;
     permissionLevel: "super_admin" | "admin" | "user";
     roleId: string | null;
+    roleName: string | null;
   }
 
   interface Session {
@@ -14,6 +15,7 @@ declare module "next-auth" {
       username: string;
       permissionLevel: "super_admin" | "admin" | "user";
       roleId: string | null;
+      roleName: string | null;
     };
   }
 }
@@ -24,5 +26,6 @@ declare module "next-auth/jwt" {
     username?: string;
     permissionLevel?: "super_admin" | "admin" | "user";
     roleId?: string | null;
+    roleName?: string | null;
   }
 }

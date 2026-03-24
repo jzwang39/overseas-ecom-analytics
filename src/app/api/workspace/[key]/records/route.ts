@@ -16,9 +16,15 @@ function isValidWorkspaceKey(key: string) {
   return false;
 }
 
+function normalizeAbandonReason(value: unknown) {
+  const v = typeof value === "string" ? value.trim() : "";
+  return v ? v : null;
+}
+
 function resolveStorageWorkspaceKey(key: string) {
-  if (key === "ops.inquiry") return "ops.purchase";
+  if (key === "ops.inquiry") return "ops.selection";
   if (key === "ops.pricing") return "ops.purchase";
+  if (key === "ops.confirm") return "ops.purchase";
   return key;
 }
 
@@ -90,6 +96,241 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
 
   const pool = getPool();
   const storageKey = resolveStorageWorkspaceKey(key);
+  if (key === "ops.inquiry") {
+    await pool.query(
+      `
+        UPDATE workspace_records dst
+        JOIN workspace_records src
+          ON src.workspace_key = ?
+         AND src.deleted_at IS NULL
+         AND src.product_rule IS NOT NULL
+         AND src.product_rule = dst.product_rule
+        SET dst.deleted_at = NOW()
+        WHERE dst.workspace_key = ?
+          AND dst.deleted_at IS NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(src.data, '$."状态"')) = ?
+      `,
+      ["ops.purchase", "ops.selection", "待询价"],
+    );
+
+    await pool.query(
+      `
+        UPDATE workspace_records
+        SET workspace_key = ?
+        WHERE workspace_key = ?
+          AND deleted_at IS NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$."状态"')) = ?
+      `,
+      ["ops.selection", "ops.purchase", "待询价"],
+    );
+  }
+  if (key === "ops.pricing") {
+    await pool.query(
+      `
+        UPDATE workspace_records dst
+        JOIN workspace_records src
+          ON src.workspace_key = ?
+         AND src.deleted_at IS NULL
+         AND src.product_rule IS NOT NULL
+         AND src.product_rule = dst.product_rule
+        SET dst.data = src.data, dst.abandon_reason = src.abandon_reason
+        WHERE dst.workspace_key = ?
+          AND dst.deleted_at IS NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(dst.data, '$."状态"')) IN (?, ?)
+          AND JSON_UNQUOTE(JSON_EXTRACT(src.data, '$."状态"')) IN (?, ?)
+      `,
+      ["ops.selection", "ops.purchase", "待分配运营者", "待分配运营", "待分配运营者", "待分配运营"],
+    );
+
+    await pool.query(
+      `
+        INSERT INTO workspace_records(workspace_key, data, abandon_reason)
+        SELECT ?, src.data, src.abandon_reason
+        FROM workspace_records src
+        WHERE src.workspace_key = ?
+          AND src.deleted_at IS NULL
+          AND src.product_rule IS NOT NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(src.data, '$."状态"')) IN (?, ?)
+          AND NOT EXISTS (
+            SELECT 1
+            FROM workspace_records dst
+            WHERE dst.workspace_key = ?
+              AND dst.deleted_at IS NULL
+              AND dst.product_rule = src.product_rule
+          )
+      `,
+      ["ops.purchase", "ops.selection", "待分配运营者", "待分配运营", "ops.purchase"],
+    );
+  }
+
+  if (key === "ops.purchase") {
+    await pool.query(
+      `
+        UPDATE workspace_records dst
+        JOIN workspace_records src
+          ON src.workspace_key = ?
+         AND src.deleted_at IS NULL
+         AND src.product_rule IS NOT NULL
+         AND src.product_rule = dst.product_rule
+        SET dst.deleted_at = NOW()
+        WHERE dst.workspace_key = ?
+          AND dst.deleted_at IS NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(src.data, '$."状态"')) = ?
+      `,
+      ["ops.selection", "ops.purchase", "待采购"],
+    );
+
+    await pool.query(
+      `
+        UPDATE workspace_records
+        SET workspace_key = ?
+        WHERE workspace_key = ?
+          AND deleted_at IS NULL
+          AND JSON_UNQUOTE(JSON_EXTRACT(data, '$."状态"')) = ?
+      `,
+      ["ops.purchase", "ops.selection", "待采购"],
+    );
+  }
+
+  if (key === "ops.confirm") {
+    const statusFilterRaw = (filtersParsed.data["状态"] ?? "").trim();
+    const wantPendingConfirm = !statusFilterRaw || statusFilterRaw === "待确品";
+    const wantNeedPurchase = !statusFilterRaw || statusFilterRaw === "待采购";
+    if (statusFilterRaw && !wantPendingConfirm && !wantNeedPurchase) return NextResponse.json({ records: [] });
+
+    const commonExtraWhere: string[] = [];
+    const commonExtraParams: unknown[] = [];
+    if (q) {
+      commonExtraWhere.push("CAST(data AS CHAR) LIKE ?");
+      commonExtraParams.push(`%${q}%`);
+    }
+
+    for (const [field, value] of Object.entries(filtersParsed.data)) {
+      if (field === "状态") continue;
+      const v = (value ?? "").trim();
+      if (!v) continue;
+      if (field === "放弃理由") {
+        commonExtraWhere.push("abandon_reason LIKE ?");
+        commonExtraParams.push(`%${v}%`);
+      } else {
+        commonExtraWhere.push("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?");
+        commonExtraParams.push(`$."${field.replaceAll('"', '\\"')}"`);
+        commonExtraParams.push(`%${v}%`);
+      }
+    }
+
+    if (timeRangeParsed.data) {
+      let start: Date | null = null;
+      let end: Date | null = null;
+      if (timeRangeParsed.data === "today") {
+        start = new Date();
+        start.setHours(0, 0, 0, 0);
+      } else if (timeRangeParsed.data === "7d") {
+        start = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      } else if (timeRangeParsed.data === "30d") {
+        start = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      } else if (timeRangeParsed.data === "custom") {
+        const startDate = parseYmd(startDateRaw);
+        const endDate = parseYmd(endDateRaw);
+        if (!startDate || !endDate) return NextResponse.json({ error: "参数错误" }, { status: 400 });
+        if (startDate.getTime() > endDate.getTime()) return NextResponse.json({ error: "参数错误" }, { status: 400 });
+        start = startDate;
+        start.setHours(0, 0, 0, 0);
+        end = endDate;
+        end.setHours(23, 59, 59, 999);
+      }
+      if (start) {
+        commonExtraWhere.push("updated_at >= ?");
+        commonExtraParams.push(start);
+      }
+      if (end) {
+        commonExtraWhere.push("updated_at <= ?");
+        commonExtraParams.push(end);
+      }
+    }
+
+    const outRows: (RowDataPacket & { id: number; data: unknown; updated_at: string; abandon_reason: string | null })[] = [];
+
+    if (wantPendingConfirm) {
+      const params: unknown[] = ["ops.selection"];
+      const where = ["workspace_key = ?", "deleted_at IS NULL", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.\"状态\"')) = ?"];
+      params.push("待确品");
+      where.push(...commonExtraWhere);
+      params.push(...commonExtraParams);
+      params.push(limit);
+      const [rows] = await pool.query<
+        (RowDataPacket & { id: number; data: unknown; updated_at: string; abandon_reason: string | null })[]
+      >(
+        `
+          SELECT id, data, updated_at, abandon_reason
+          FROM workspace_records
+          WHERE ${where.join(" AND ")}
+          ORDER BY id DESC
+          LIMIT ?
+        `,
+        params,
+      );
+      outRows.push(...rows);
+
+      const params2: unknown[] = ["ops.purchase"];
+      const where2 = ["workspace_key = ?", "deleted_at IS NULL", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.\"状态\"')) = ?"];
+      params2.push("待确品");
+      where2.push(...commonExtraWhere);
+      params2.push(...commonExtraParams);
+      params2.push(limit);
+      const [rows2] = await pool.query<
+        (RowDataPacket & { id: number; data: unknown; updated_at: string; abandon_reason: string | null })[]
+      >(
+        `
+          SELECT id, data, updated_at, abandon_reason
+          FROM workspace_records
+          WHERE ${where2.join(" AND ")}
+          ORDER BY id DESC
+          LIMIT ?
+        `,
+        params2,
+      );
+      outRows.push(...rows2);
+    }
+
+    if (wantNeedPurchase) {
+      const params: unknown[] = ["ops.purchase"];
+      const where = ["workspace_key = ?", "deleted_at IS NULL", "JSON_UNQUOTE(JSON_EXTRACT(data, '$.\"状态\"')) = ?"];
+      params.push("待采购");
+      where.push(...commonExtraWhere);
+      params.push(...commonExtraParams);
+      params.push(limit);
+      const [rows] = await pool.query<
+        (RowDataPacket & { id: number; data: unknown; updated_at: string; abandon_reason: string | null })[]
+      >(
+        `
+          SELECT id, data, updated_at, abandon_reason
+          FROM workspace_records
+          WHERE ${where.join(" AND ")}
+          ORDER BY id DESC
+          LIMIT ?
+        `,
+        params,
+      );
+      outRows.push(...rows);
+    }
+
+    outRows.sort((a, b) => (b.id ?? 0) - (a.id ?? 0));
+    const merged = outRows.slice(0, limit).map((r) => {
+      const obj =
+        r.data && typeof r.data === "object" && !Array.isArray(r.data)
+          ? (r.data as Record<string, unknown>)
+          : {};
+      const currentReason = String(obj["放弃理由"] ?? "").trim();
+      if (!currentReason && r.abandon_reason) {
+        return { ...r, data: { ...obj, 放弃理由: r.abandon_reason } };
+      }
+      return r;
+    });
+
+    return NextResponse.json({ records: merged });
+  }
+
   const params: unknown[] = [storageKey];
   const where = ["workspace_key = ?", "deleted_at IS NULL"];
   if (q) {
@@ -100,9 +341,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
   for (const [field, value] of Object.entries(filtersParsed.data)) {
     const v = (value ?? "").trim();
     if (!v) continue;
-    where.push("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?");
-    params.push(`$."${field.replaceAll('"', '\\"')}"`);
-    params.push(`%${v}%`);
+    if (field === "放弃理由") {
+      where.push("abandon_reason LIKE ?");
+      params.push(`%${v}%`);
+    } else {
+      where.push("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?");
+      params.push(`$."${field.replaceAll('"', '\\"')}"`);
+      params.push(`%${v}%`);
+    }
   }
 
   if (timeRangeParsed.data) {
@@ -142,10 +388,11 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
       id: number;
       data: unknown;
       updated_at: string;
+      abandon_reason: string | null;
     })[]
   >(
     `
-    SELECT id, data, updated_at
+    SELECT id, data, updated_at, abandon_reason
     FROM workspace_records
     WHERE ${where.join(" AND ")}
     ORDER BY id DESC
@@ -154,7 +401,19 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
     params,
   );
 
-  return NextResponse.json({ records: rows });
+  const records = rows.map((r) => {
+    const obj =
+      r.data && typeof r.data === "object" && !Array.isArray(r.data)
+        ? (r.data as Record<string, unknown>)
+        : {};
+    const currentReason = String(obj["放弃理由"] ?? "").trim();
+    if (!currentReason && r.abandon_reason) {
+      return { ...r, data: { ...obj, 放弃理由: r.abandon_reason } };
+    }
+    return r;
+  });
+
+  return NextResponse.json({ records });
 }
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ key: string }> }) {
@@ -172,6 +431,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ key: strin
   const pool = getPool();
   const storageKey = resolveStorageWorkspaceKey(key);
   const normalized = normalizeWorkspaceData(key, parsed.data.data, "create");
+  const abandonReason = normalizeAbandonReason(normalized["放弃理由"]);
 
   if (storageKey === "ops.purchase") {
     const currentOwner = typeof normalized["询价负责人"] === "string" ? normalized["询价负责人"].trim() : "";
@@ -200,8 +460,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ key: strin
   if (storageKey === "ops.purchase" && productRule) {
     try {
       const [result] = await pool.query<ResultSetHeader>(
-        "INSERT INTO workspace_records(workspace_key, data) VALUES (?, CAST(? AS JSON))",
-        [storageKey, JSON.stringify(normalized)],
+        "INSERT INTO workspace_records(workspace_key, data, abandon_reason) VALUES (?, CAST(? AS JSON), ?)",
+        [storageKey, JSON.stringify(normalized), abandonReason],
       );
 
       await logOperation({
@@ -222,13 +482,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ key: strin
       await pool.query<ResultSetHeader>(
         `
         UPDATE workspace_records
-        SET data = CAST(? AS JSON)
+        SET data = CAST(? AS JSON), abandon_reason = ?
         WHERE workspace_key = ?
           AND product_rule = ?
           AND deleted_at IS NULL
         LIMIT 1
       `,
-        [JSON.stringify(normalized), storageKey, productRule],
+        [JSON.stringify(normalized), abandonReason, storageKey, productRule],
       );
 
       const [rows] = await pool.query<(RowDataPacket & { id: number })[]>(
@@ -258,8 +518,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ key: strin
   }
 
   const [result] = await pool.query<ResultSetHeader>(
-    "INSERT INTO workspace_records(workspace_key, data) VALUES (?, CAST(? AS JSON))",
-    [storageKey, JSON.stringify(normalized)],
+    "INSERT INTO workspace_records(workspace_key, data, abandon_reason) VALUES (?, CAST(? AS JSON), ?)",
+    [storageKey, JSON.stringify(normalized), abandonReason],
   );
 
   await logOperation({

@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "海外电商数据分析",
-  description: "海外电商数据分析与运营工作台",
+  title: "至繁商贸 Next-Gen E-commerce ERP",
+  description: "全链路海外电商数据分析与业务管理解决方案",
 };
 
 export default function RootLayout({

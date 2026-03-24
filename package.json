@@ -3,15 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
+    "test:e2e": "node scripts/e2e-runner.mjs",
+    "test:e2e:raw": "playwright test",
+    "test:e2e:ui": "node scripts/e2e-runner.mjs --ui",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:cypress": "node scripts/cypress-runner.mjs",
+    "test:e2e:cypress:raw": "cypress run",
+    "test:purchase-form": "node scripts/purchase-form-smoketest.mjs",
     "db:migrate": "node scripts/migrate.mjs",
     "db:seed": "node scripts/seed.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "lucide-react": "^0.577.0",
     "mysql2": "^3.16.2",
     "next": "16.1.6",
     "next-auth": "^4.24.13",
@@ -21,10 +29,12 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.50.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cypress": "^14.5.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",

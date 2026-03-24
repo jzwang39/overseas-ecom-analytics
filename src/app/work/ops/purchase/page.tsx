@@ -4,10 +4,10 @@ export default async function OpsPurchasePage() {
   return (
     <WorkspaceClient
       workspaceKey="ops.purchase"
-      title="选品"
+      title="采购"
       groupLabel="业务运营"
       hideInquiryCreateButton
-      createButtonLabel="新增选品数据"
+      hideCreateButton
     />
   );
 }

@@ -41,10 +41,22 @@ export const authOptions: NextAuthOptions = {
             password_hash: string;
             permission_level: "super_admin" | "admin" | "user";
             role_id: number | null;
+            role_name: string | null;
             is_disabled: 0 | 1;
           })[]
         >(
-          "SELECT id, username, display_name, password_hash, permission_level, role_id, is_disabled FROM users WHERE username = ? AND deleted_at IS NULL LIMIT 1",
+          `
+            SELECT
+              u.id, u.username, u.display_name, u.password_hash,
+              u.permission_level, u.role_id,
+              r.name AS role_name,
+              u.is_disabled
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
+            WHERE u.username = ?
+              AND u.deleted_at IS NULL
+            LIMIT 1
+          `,
           [input.data.username],
         );
 
@@ -61,6 +73,7 @@ export const authOptions: NextAuthOptions = {
           username: user.username,
           permissionLevel: user.permission_level,
           roleId: user.role_id ? String(user.role_id) : null,
+          roleName: user.role_name ?? null,
         };
       },
     }),
@@ -72,6 +85,7 @@ export const authOptions: NextAuthOptions = {
         token.username = user.username;
         token.permissionLevel = user.permissionLevel;
         token.roleId = user.roleId;
+        token.roleName = user.roleName;
       }
       return token;
     },
@@ -82,6 +96,7 @@ export const authOptions: NextAuthOptions = {
         username: token.username ?? "",
         permissionLevel: token.permissionLevel ?? "user",
         roleId: token.roleId ?? null,
+        roleName: token.roleName ?? null,
       };
       return session;
     },

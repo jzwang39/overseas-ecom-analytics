@@ -1,11 +1,49 @@
 "use client";
 
 import Image from "next/image";
+import { Users, Clock, XCircle, Search, RotateCcw, Check, X, ExternalLink, Plus, Trash2, Paperclip } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getWorkspaceSchema } from "@/lib/workspace/schemas";
 import { useSession } from "next-auth/react";
 
 type RecordRow = { id: number; updated_at: string; data: unknown };
+
+type EditModalShellProps = {
+  title: ReactNode;
+  dataEditModal: string;
+  onClose: () => void;
+  children: ReactNode;
+};
+
+function EditModalShell({ title, dataEditModal, onClose, children }: EditModalShellProps) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      data-edit-modal={dataEditModal}
+      onKeyDown={(e) => {
+        const t = e.target as EventTarget | null;
+        if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || t instanceof HTMLSelectElement) {
+          e.stopPropagation();
+        }
+      }}
+    >
+      <div className="w-full max-w-4xl rounded-xl border border-border bg-surface p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-medium">{title}</div>
+          <button
+            type="button"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+            title="关闭"
+            onClick={onClose}
+          >
+            ✕
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
 
 function toRecordStringUnknown(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -54,9 +92,11 @@ function sanitizeDecimalInput(raw: string) {
 
 type FieldKind = "text" | "url" | "number" | "image" | "category" | "yesno";
 
-const IMAGE_FIELDS = new Set(["产品图片", "产品实物图", "包裹实物包装图"]);
+const IMAGE_FIELDS = new Set(["产品图片", "产品实物图", "包裹实物包装图", "发票附件"]);
 const URL_FIELDS = new Set(["参考链接", "产品链接×"]);
 const INQUIRY_STATUS_VALUE = "待分配【询价】";
+const SELECTION_PENDING_STATUS_VALUE = "待选品";
+const SELECTION_ABANDON_STATUS_VALUE = "【选品】已放弃";
 const MAIN_PROCESS_OPTIONS = ["注塑", "五金", "木制", "缝制", "印刷", "玻璃", "陶瓷", "电子组装", "其他"] as const;
 
 function displayFieldLabel(field: string) {
@@ -108,6 +148,8 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
   "询价人",
   "产品规则",
   "产品规格输入方式",
+  "放弃理由",
+  "撤回理由",
   "包装尺寸-长（英寸）",
   "包装尺寸-宽（英寸）",
   "包装尺寸-高（英寸）",
@@ -162,7 +204,7 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
 ]);
 
 const PURCHASE_PRODUCT_SIZE_FIELDS = ["产品尺寸-长（厘米）", "产品尺寸-宽（厘米）", "产品尺寸-高（厘米）"] as const;
-const WORKSPACE_TABLE_HIDDEN_FIELDS = new Set(["产品链接×", "运营人员", "创建时间", "最后更新时间"]);
+const WORKSPACE_TABLE_HIDDEN_FIELDS = new Set(["产品链接×", "运营人员", "创建时间", "最后更新时间", "放弃理由"]);
 const PURCHASE_TABLE_HIDDEN_FIELDS = new Set([
   "选品人",
   "询价分配人｜选品",
@@ -192,6 +234,7 @@ const INQUIRY_TABLE_HIDDEN_FIELDS = new Set([
 const INQUIRY_UI_HIDDEN_FIELDS = new Set([
   "产品规则",
   "产品规格输入方式",
+  "放弃理由",
   "海外仓（卸货费）",
   "海外仓（操作费）",
   "派送费（需要测试？）",
@@ -677,6 +720,7 @@ export function WorkspaceClient({
   groupLabel,
   hideCreateButton = false,
   hideInquiryCreateButton = false,
+  secondaryCreateButtonLabel,
   createButtonLabel = "新增数据",
 }: {
   workspaceKey: string;
@@ -684,16 +728,44 @@ export function WorkspaceClient({
   groupLabel: string;
   hideCreateButton?: boolean;
   hideInquiryCreateButton?: boolean;
+  secondaryCreateButtonLabel?: string;
   createButtonLabel?: string;
 }) {
   const { data: session } = useSession();
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [q, setQ] = useState("");
+  const canInquiryBulkAssign = useMemo(() => {
+    const level = session?.user?.permissionLevel;
+    if (level === "admin" || level === "super_admin") return true;
+    const roleName = session?.user?.roleName;
+    return roleName === "询价管理员" || roleName === "询价负责人";
+  }, [session?.user?.permissionLevel, session?.user?.roleName]);
+  const canSeePricingBulkAssign = useMemo(() => {
+    const level = session?.user?.permissionLevel;
+    if (level === "admin" || level === "super_admin") return true;
+    return session?.user?.roleName === "运营管理员";
+  }, [session?.user?.permissionLevel, session?.user?.roleName]);
 
   const schema = useMemo(() => getWorkspaceSchema(workspaceKey), [workspaceKey]);
   const [filters, setFilters] = useState<Record<string, string>>({});
-  const [timeRange, setTimeRange] = useState<"" | "today" | "7d" | "30d" | "custom">("");
+  type SelectionStatusFilter =
+    | ""
+    | typeof SELECTION_PENDING_STATUS_VALUE
+    | typeof INQUIRY_STATUS_VALUE
+    | typeof SELECTION_ABANDON_STATUS_VALUE;
+  const [selectionStatusFilter, setSelectionStatusFilter] = useState<SelectionStatusFilter>("");
+  type InquiryStatusFilter = "" | "待询价" | typeof INQUIRY_STATUS_VALUE | "待分配运营者";
+  const [inquiryStatusFilter, setInquiryStatusFilter] = useState<InquiryStatusFilter>("");
+  type PricingStatusFilter = "" | "待核价" | "待分配运营者" | "待确品" | "【核价】已放弃";
+  const [pricingStatusFilter, setPricingStatusFilter] = useState<PricingStatusFilter>("");
+  type ConfirmStatusFilter = "" | "待确品" | "待采购";
+  const [confirmStatusFilter, setConfirmStatusFilter] = useState<ConfirmStatusFilter>("");
+  type PurchaseStatusFilter = "" | "待采购" | "待发货" | "已到仓" | "已发运";
+  const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<PurchaseStatusFilter>("");
+  const [timeRange, setTimeRange] = useState<
+    "" | "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "7d" | "30d" | "custom"
+  >("");
   const [customStartDate, setCustomStartDate] = useState("");
   const [customEndDate, setCustomEndDate] = useState("");
   const [categories, setCategories] = useState<string[]>([]);
@@ -702,15 +774,52 @@ export function WorkspaceClient({
   const [linkDraftByField, setLinkDraftByField] = useState<Record<string, string[]>>({});
   const linkInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const pendingLinkFocusKey = useRef<string | null>(null);
-  const editFieldRefs = useRef<Record<string, HTMLElement | null>>({});
-  const pendingEditFocus = useRef<{ key: string; selectionStart: number | null; selectionEnd: number | null } | null>(
-    null,
-  );
+  const inquiryModalFieldRefs = useRef<Record<string, HTMLElement | null>>({});
+  const pendingInquiryModalFocus = useRef<{
+    key: string;
+    selectionStart: number | null;
+    selectionEnd: number | null;
+  } | null>(null);
+  const editModalFieldRefs = useRef<Record<string, HTMLElement | null>>({});
+  const editModalLastFocusedKey = useRef<string | null>(null);
+  const pendingEditModalFocus = useRef<{
+    key: string;
+    selectionStart: number | null;
+    selectionEnd: number | null;
+  } | null>(null);
+  const editModalComposingRef = useRef(false);
+  const [isComposing, setIsComposing] = useState(false);
   const [imageViewer, setImageViewer] = useState<{ urls: string[]; index: number } | null>(null);
 
-  const [editing, setEditing] = useState<{ id: number | null; data: Record<string, string> } | null>(
-    null,
-  );
+  useEffect(() => {
+    if (workspaceKey !== "ops.selection") return;
+    setSelectionStatusFilter("");
+  }, [workspaceKey]);
+  useEffect(() => {
+    if (workspaceKey !== "ops.inquiry") return;
+    setInquiryStatusFilter("");
+  }, [workspaceKey]);
+  useEffect(() => {
+    if (workspaceKey !== "ops.pricing") return;
+    setPricingStatusFilter("");
+  }, [workspaceKey]);
+  useEffect(() => {
+    if (workspaceKey !== "ops.confirm") return;
+    setConfirmStatusFilter("");
+  }, [workspaceKey]);
+  useEffect(() => {
+    if (workspaceKey !== "ops.purchase") return;
+    setPurchaseStatusFilter("");
+  }, [workspaceKey]);
+
+  const [editing, setEditing] = useState<{
+    id: number | null;
+    data: Record<string, string>;
+    relatedIds?: number[];
+    specIdMap?: Record<string, number[]>;
+    specSlotIds?: number[];
+  } | null>(null);
+  const [editCreateMode, setEditCreateMode] = useState<"default" | "selectionData">("default");
 
   const [inquiryCreateOpen, setInquiryCreateOpen] = useState(false);
   const [inquiryUnits, setInquiryUnits] = useState<"cmkg" | "inlb">("cmkg");
@@ -792,12 +901,49 @@ export function WorkspaceClient({
   );
   const [inquiryAssigneeLoading, setInquiryAssigneeLoading] = useState(false);
   const [inquiryAssignSaving, setInquiryAssignSaving] = useState(false);
+  const [inquiryWithdrawOpen, setInquiryWithdrawOpen] = useState(false);
+  const [inquiryWithdrawRecordId, setInquiryWithdrawRecordId] = useState<number | null>(null);
+  const [inquiryWithdrawPreview, setInquiryWithdrawPreview] = useState<{
+    productName: string;
+    category: string;
+    productSize: string;
+    productWeight: string;
+  } | null>(null);
+  const [inquiryWithdrawReason, setInquiryWithdrawReason] = useState("");
+  const [inquiryWithdrawSaving, setInquiryWithdrawSaving] = useState(false);
+  const [selectionAbandonOpen, setSelectionAbandonOpen] = useState(false);
+  const [selectionAbandonRecordId, setSelectionAbandonRecordId] = useState<number | null>(null);
+  const [selectionAbandonPreview, setSelectionAbandonPreview] = useState<{
+    productName: string;
+    category: string;
+    productSize: string;
+    productWeight: string;
+  } | null>(null);
+  const [selectionAbandonReason, setSelectionAbandonReason] = useState("");
+  const [selectionAbandonSaving, setSelectionAbandonSaving] = useState(false);
   const [inquiryBulkAssignOpen, setInquiryBulkAssignOpen] = useState(false);
   const [inquiryBulkAssignPerson, setInquiryBulkAssignPerson] = useState("");
   const [inquiryBulkAssignSaving, setInquiryBulkAssignSaving] = useState(false);
   const [inquiryBulkEditOpen, setInquiryBulkEditOpen] = useState(false);
   const [inquiryBulkEditUnits, setInquiryBulkEditUnits] = useState<"cmkg" | "inlb">("cmkg");
   const [inquiryBulkEditSaving, setInquiryBulkEditSaving] = useState(false);
+  const [inquiryBulkEditAction, setInquiryBulkEditAction] = useState<null | "confirm" | "submit">(null);
+  const [inquiryBulkEditPreview, setInquiryBulkEditPreview] = useState<{
+    productName: string;
+    category: string;
+    productUnitPrice: string;
+    moq: string;
+    discountPolicy: string;
+    discountNote: string;
+    packageLengthCm: string;
+    packageWidthCm: string;
+    packageHeightCm: string;
+    packageWeightKg: string;
+    mainProcess: string;
+    factoryLocation: string;
+    factoryContact: string;
+    factoryPhone: string;
+  } | null>(null);
   const [inquiryBulkEditIds, setInquiryBulkEditIds] = useState<number[]>([]);
   const [inquiryBulkEditSpecs, setInquiryBulkEditSpecs] = useState<string[]>([]);
   const [inquiryBulkEditForm, setInquiryBulkEditForm] = useState<{
@@ -828,6 +974,66 @@ export function WorkspaceClient({
     factoryPhone: "",
   });
   const [inquirySelectedIds, setInquirySelectedIds] = useState<Set<number>>(() => new Set());
+  const canInquiryBulkEdit = useMemo(() => {
+    if (workspaceKey !== "ops.inquiry") return false;
+    const ids = Array.from(inquirySelectedIds);
+    if (ids.length === 0) return false;
+    let first = "";
+    for (const row of records) {
+      if (!inquirySelectedIds.has(row.id)) continue;
+      const obj = toRecordStringUnknown(row.data);
+      const status = String(obj["状态"] ?? "").trim();
+      if (status === INQUIRY_STATUS_VALUE) return false;
+      const name = String(obj["名称"] ?? obj["商品名称"] ?? "").trim();
+      if (!name) return false;
+      if (!first) first = name;
+      else if (name !== first) return false;
+    }
+    return Boolean(first);
+  }, [inquirySelectedIds, records, workspaceKey]);
+  const [pricingSelectedIds, setPricingSelectedIds] = useState<Set<number>>(() => new Set());
+  const canPricingBulkAssign = useMemo(() => {
+    if (workspaceKey !== "ops.pricing") return false;
+    if (pricingSelectedIds.size === 0) return false;
+    for (const row of records) {
+      if (!pricingSelectedIds.has(row.id)) continue;
+      const obj = toRecordStringUnknown(row.data);
+      const status = String(obj["状态"] ?? "").trim();
+      if (status !== "待分配运营者") return false;
+    }
+    return true;
+  }, [pricingSelectedIds, records, workspaceKey]);
+  const [pricingAssigneeOptions, setPricingAssigneeOptions] = useState<{ username: string; displayName: string }[]>([]);
+  const [pricingAssigneeLoading, setPricingAssigneeLoading] = useState(false);
+  const [pricingBulkAssignOpen, setPricingBulkAssignOpen] = useState(false);
+  const [pricingBulkAssignPerson, setPricingBulkAssignPerson] = useState("");
+  const [pricingBulkAssignSaving, setPricingBulkAssignSaving] = useState(false);
+  const [pricingRowAction, setPricingRowAction] = useState<string | null>(null);
+  const [pricingAbandonOpen, setPricingAbandonOpen] = useState(false);
+  const [pricingAbandonRecordId, setPricingAbandonRecordId] = useState<number | null>(null);
+  const [pricingAbandonProductName, setPricingAbandonProductName] = useState("");
+  const [pricingAbandonReason, setPricingAbandonReason] = useState("");
+  const [pricingAbandonSaving, setPricingAbandonSaving] = useState(false);
+  const [pricingWithdrawOpen, setPricingWithdrawOpen] = useState(false);
+  const [pricingWithdrawRecordId, setPricingWithdrawRecordId] = useState<number | null>(null);
+  const [pricingWithdrawProductName, setPricingWithdrawProductName] = useState("");
+  const [pricingWithdrawReason, setPricingWithdrawReason] = useState("");
+  const [pricingWithdrawSaving, setPricingWithdrawSaving] = useState(false);
+  const [pricingUnits, setPricingUnits] = useState<"cmkg" | "inlb">("cmkg");
+  const [confirmUnits, setConfirmUnits] = useState<"cmkg" | "inlb">("cmkg");
+  const [purchaseUnits, setPurchaseUnits] = useState<"cmkg" | "inlb">("cmkg");
+  const [confirmWithdrawOpen, setConfirmWithdrawOpen] = useState(false);
+  const [confirmWithdrawRecordId, setConfirmWithdrawRecordId] = useState<number | null>(null);
+  const [confirmWithdrawProductName, setConfirmWithdrawProductName] = useState("");
+  const [confirmWithdrawReason, setConfirmWithdrawReason] = useState("");
+  const [confirmWithdrawSaving, setConfirmWithdrawSaving] = useState(false);
+  const [purchaseWithdrawOpen, setPurchaseWithdrawOpen] = useState(false);
+  const [purchaseWithdrawRecordId, setPurchaseWithdrawRecordId] = useState<number | null>(null);
+  const [purchaseWithdrawProductName, setPurchaseWithdrawProductName] = useState("");
+  const [purchaseWithdrawReason, setPurchaseWithdrawReason] = useState("");
+  const [purchaseWithdrawSaving, setPurchaseWithdrawSaving] = useState(false);
+  const [purchaseRowAction, setPurchaseRowAction] = useState<string | null>(null);
+  const [confirmRowAction, setConfirmRowAction] = useState<string | null>(null);
 
   const operatorName = useMemo(() => {
     const name = session?.user?.name;
@@ -867,6 +1073,16 @@ export function WorkspaceClient({
     setInquiryAssignOpen(false);
     setInquiryAssignUnits("cmkg");
     setInquiryAssignRecordId(null);
+    setInquiryWithdrawOpen(false);
+    setInquiryWithdrawRecordId(null);
+    setInquiryWithdrawPreview(null);
+    setInquiryWithdrawReason("");
+    setInquiryWithdrawSaving(false);
+    setSelectionAbandonOpen(false);
+    setSelectionAbandonRecordId(null);
+    setSelectionAbandonPreview(null);
+    setSelectionAbandonReason("");
+    setSelectionAbandonSaving(false);
     setInquiryAssignForm({
       productName: "",
       category: "",
@@ -893,6 +1109,8 @@ export function WorkspaceClient({
     setInquiryBulkEditOpen(false);
     setInquiryBulkEditUnits("cmkg");
     setInquiryBulkEditSaving(false);
+    setInquiryBulkEditAction(null);
+    setInquiryBulkEditPreview(null);
     setInquiryBulkEditIds([]);
     setInquiryBulkEditSpecs([]);
     setInquiryBulkEditForm({
@@ -910,6 +1128,16 @@ export function WorkspaceClient({
       factoryPhone: "",
     });
     setInquirySelectedIds(new Set());
+    setPricingSelectedIds(new Set());
+    setPricingAssigneeOptions([]);
+    setPricingAssigneeLoading(false);
+    setPricingBulkAssignOpen(false);
+    setPricingBulkAssignPerson("");
+    setPricingBulkAssignSaving(false);
+    setPricingRowAction(null);
+    setPricingUnits("cmkg");
+    setConfirmUnits("cmkg");
+    setPurchaseUnits("cmkg");
     setUploadingField(null);
     setImageIndexByField({});
     setLinkDraftByField({});
@@ -920,7 +1148,13 @@ export function WorkspaceClient({
     setLinkDraftByField({});
   }, [editing]);
 
+  useEffect(() => {
+    if (!editing) return;
+    if (editing.id != null) setEditCreateMode("default");
+  }, [editing]);
+
   useLayoutEffect(() => {
+    if (isComposing) return;
     const key = pendingLinkFocusKey.current;
     if (!key) return;
     pendingLinkFocusKey.current = null;
@@ -932,13 +1166,15 @@ export function WorkspaceClient({
     try {
       el.setSelectionRange(len, len);
     } catch {}
-  }, [linkDraftByField]);
+  }, [linkDraftByField, isComposing]);
 
   useLayoutEffect(() => {
-    const pending = pendingEditFocus.current;
+    if (isComposing) return;
+    if (!inquiryCreateOpen && !inquiryBulkEditOpen) return;
+    const pending = pendingInquiryModalFocus.current;
     if (!pending) return;
-    pendingEditFocus.current = null;
-    const el = editFieldRefs.current[pending.key];
+    pendingInquiryModalFocus.current = null;
+    const el = inquiryModalFieldRefs.current[pending.key];
     if (!el) return;
     if (document.activeElement !== el) el.focus();
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
@@ -950,7 +1186,45 @@ export function WorkspaceClient({
         } catch {}
       }
     }
-  }, [editing]);
+  }, [inquiryCreateOpen, inquiryForm, inquiryUnits, inquiryBulkEditOpen, inquiryBulkEditForm, inquiryBulkEditUnits, isComposing]);
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    if (isComposing || editModalComposingRef.current) return;
+    const pending = pendingEditModalFocus.current;
+    if (!pending) return;
+    pendingEditModalFocus.current = null;
+    const el = editModalFieldRefs.current[pending.key];
+    if (!el) return;
+    if (document.activeElement !== el) el.focus();
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const start = pending.selectionStart;
+      const end = pending.selectionEnd;
+      if (start != null && end != null) {
+        try {
+          el.setSelectionRange(start, end);
+        } catch {}
+      }
+    }
+  }, [editing, isComposing]);
+
+  useLayoutEffect(() => {
+    if (!editing) return;
+    const key = editModalLastFocusedKey.current;
+    if (!key) return;
+    const active = document.activeElement;
+    if (active && active !== document.body) return;
+    const el = editModalFieldRefs.current[key];
+    if (!el) return;
+    if (document.activeElement !== el) el.focus();
+    if (isComposing || editModalComposingRef.current) return;
+    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+      const len = el.value.length;
+      try {
+        el.setSelectionRange(len, len);
+      } catch {}
+    }
+  }, [editing, isComposing]);
 
   useEffect(() => {
     if (!schema) return;
@@ -984,7 +1258,7 @@ export function WorkspaceClient({
 
   const visibleFields = useMemo(() => {
     if (!schema) return [];
-    if (workspaceKey === "ops.purchase") {
+    if (workspaceKey === "ops.purchase" || workspaceKey === "ops.selection" || workspaceKey === "ops.confirm") {
       const base = schema.fields.filter((f) => !PURCHASE_UI_HIDDEN_FIELDS.has(f));
       const toInsert = PURCHASE_PRODUCT_SIZE_FIELDS.filter((f) => base.includes(f));
       if (toInsert.length === 0) return base;
@@ -1002,7 +1276,7 @@ export function WorkspaceClient({
 
   const tableFields = useMemo(() => {
     if (!schema) return [];
-    if (workspaceKey === "ops.purchase") {
+    if (workspaceKey === "ops.purchase" || workspaceKey === "ops.selection" || workspaceKey === "ops.confirm") {
       return visibleFields.filter((f) => !WORKSPACE_TABLE_HIDDEN_FIELDS.has(f) && !PURCHASE_TABLE_HIDDEN_FIELDS.has(f));
     }
     if (workspaceKey === "ops.inquiry") {
@@ -1024,7 +1298,13 @@ export function WorkspaceClient({
     }
     const qs = new URLSearchParams();
     if (Object.keys(active).length) qs.set("filters", JSON.stringify(active));
-    if (workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry") {
+    if (
+      workspaceKey === "ops.purchase" ||
+      workspaceKey === "ops.selection" ||
+      workspaceKey === "ops.inquiry" ||
+      workspaceKey === "ops.pricing" ||
+      workspaceKey === "ops.confirm"
+    ) {
       if (timeRange) qs.set("timeRange", timeRange);
       if (timeRange === "custom") {
         if (customStartDate) qs.set("startDate", customStartDate);
@@ -1050,7 +1330,13 @@ export function WorkspaceClient({
         }
         const qs = new URLSearchParams();
         if (Object.keys(active).length) qs.set("filters", JSON.stringify(active));
-        if (workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry") {
+        if (
+          workspaceKey === "ops.purchase" ||
+          workspaceKey === "ops.selection" ||
+          workspaceKey === "ops.inquiry" ||
+          workspaceKey === "ops.pricing" ||
+          workspaceKey === "ops.confirm"
+        ) {
           if (timeRange) qs.set("timeRange", timeRange);
           if (timeRange === "custom") {
             if (customStartDate) qs.set("startDate", customStartDate);
@@ -1084,12 +1370,25 @@ export function WorkspaceClient({
     });
   }, [records, workspaceKey]);
 
-  function openCreate() {
+  useEffect(() => {
+    if (workspaceKey !== "ops.pricing") return;
+    setPricingSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const current = new Set<number>();
+      for (const r of records) current.add(r.id);
+      const next = new Set<number>();
+      for (const id of prev) if (current.has(id)) next.add(id);
+      return next.size === prev.size ? prev : next;
+    });
+  }, [records, workspaceKey]);
+
+  function openCreateWithMode(mode: "default" | "selectionData") {
     if (!schema) return;
+    setEditCreateMode(mode);
     const data: Record<string, string> = {};
     for (const f of schema.fields) data[f] = getDefaultFieldValue(f);
     if (schema.fields.includes("运营人员") && operatorName) data["运营人员"] = operatorName;
-    if (schema.fields.includes("状态")) data["状态"] = INQUIRY_STATUS_VALUE;
+    if (workspaceKey === "ops.selection" && schema.fields.includes("状态")) data["状态"] = "待选品";
     const drafts: Record<string, string[]> = {};
     if (schema.fields.includes("参考链接")) {
       const links = parseDelimitedValues(data["参考链接"] ?? "");
@@ -1101,6 +1400,14 @@ export function WorkspaceClient({
     }
     setLinkDraftByField(drafts);
     setEditing({ id: null, data: applyComputedFields(schema, data) });
+  }
+
+  function openCreate() {
+    openCreateWithMode("default");
+  }
+
+  function openSecondaryCreate() {
+    openCreateWithMode("selectionData");
   }
 
   function openInquiryCreate() {
@@ -1130,7 +1437,10 @@ export function WorkspaceClient({
     setInquiryCreateOpen(true);
   }
 
-  async function saveInquiryPurchase(status: "待确品" | "已确品", action: "save" | "submit") {
+  async function saveInquiryPurchase(
+    status: "待询价" | "待分配运营者" | "待核价" | "待确品" | "已确品",
+    action: "save" | "submit",
+  ) {
     if (inquiryActionLoading) return;
     setInquiryActionLoading(action);
     try {
@@ -1165,7 +1475,7 @@ export function WorkspaceClient({
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
       if (operatorName) data["运营人员"] = operatorName;
 
-      const endpointBase = `/api/workspace/${encodeURIComponent("ops.purchase")}/records`;
+      const endpointBase = `/api/workspace/${encodeURIComponent(workspaceKey)}/records`;
       const url = inquiryEditingId != null ? `${endpointBase}/${inquiryEditingId}` : endpointBase;
       const res = await fetch(url, {
         method: inquiryEditingId != null ? "PATCH" : "POST",
@@ -1186,20 +1496,6 @@ export function WorkspaceClient({
     } finally {
       setInquiryActionLoading(null);
     }
-  }
-
-  const isAdmin = session?.user?.permissionLevel != null && session.user.permissionLevel !== "user";
-  const currentUsername = typeof session?.user?.username === "string" ? session.user.username : "";
-
-  function canSeeInquiryAssign(row: RecordRow) {
-    if (workspaceKey !== "ops.inquiry") return false;
-    if (isAdmin) return true;
-    const obj = toRecordStringUnknown(row.data);
-    const owner = String(obj["询价负责人"] ?? "").trim();
-    if (!owner) return false;
-    if (currentUsername && owner === currentUsername) return true;
-    if (operatorName && owner === operatorName) return true;
-    return false;
   }
 
   async function ensureInquiryAssigneesLoaded() {
@@ -1232,35 +1528,6 @@ export function WorkspaceClient({
     } finally {
       setInquiryAssigneeLoading(false);
     }
-  }
-
-  function openInquiryAssign(row: RecordRow) {
-    if (workspaceKey !== "ops.inquiry") return;
-    const obj = toRecordStringUnknown(row.data);
-    setEditing(null);
-    setInquiryCreateOpen(false);
-    setInquiryAssignUnits("cmkg");
-    setInquiryAssignRecordId(row.id);
-    setInquiryAssignForm({
-      productName: String(obj["名称"] ?? ""),
-      category: String(obj["所属类目"] ?? ""),
-      productUnitPrice: String(obj["产品单价"] ?? ""),
-      moq: String(obj["起订量"] ?? ""),
-      discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
-      discountNote: String(obj["优惠政策备注"] ?? ""),
-      packageLengthCm: String(obj["包裹尺寸-长（厘米）"] ?? ""),
-      packageWidthCm: String(obj["包裹尺寸-宽（厘米）"] ?? ""),
-      packageHeightCm: String(obj["包裹尺寸-高（厘米）"] ?? ""),
-      packageWeightKg: String(obj["包裹实重（公斤）"] ?? ""),
-      mainProcess: String(obj["主要工艺"] ?? ""),
-      factoryLocation: String(obj["工厂所在地"] ?? ""),
-      factoryContact: String(obj["工厂联系人"] ?? ""),
-      factoryPhone: String(obj["联系人电话"] ?? ""),
-    });
-    setInquiryAssignPerson(String(obj["询价人"] ?? ""));
-    setInquiryAssignSaving(false);
-    setInquiryAssignOpen(true);
-    void ensureInquiryAssigneesLoaded();
   }
 
   async function saveInquiryAssign() {
@@ -1309,10 +1576,542 @@ export function WorkspaceClient({
     void ensureInquiryAssigneesLoaded();
   }
 
+  function openInquiryWithdraw(row: RecordRow) {
+    if (workspaceKey !== "ops.inquiry") return;
+    const obj = toRecordStringUnknown(row.data);
+    const status = String(obj["状态"] ?? "").trim();
+    if (status !== "待询价") return;
+    setEditing(null);
+    setInquiryCreateOpen(false);
+    setInquiryAssignOpen(false);
+    setInquiryAssignRecordId(null);
+    setInquiryAssignPerson("");
+    setInquiryBulkAssignOpen(false);
+    setInquiryBulkAssignPerson("");
+    setInquiryBulkEditOpen(false);
+    setInquiryWithdrawRecordId(row.id);
+    const productName = String(obj["名称"] ?? obj["商品名称"] ?? "").trim() || "—";
+    const category = String(obj["所属类目"] ?? "").trim() || "—";
+    const pL = String(obj["产品尺寸-长（厘米）"] ?? "").trim();
+    const pW = String(obj["产品尺寸-宽（厘米）"] ?? "").trim();
+    const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
+    const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm` : "—x—x—cm";
+    const w = String(obj["产品重量"] ?? "").trim();
+    const productWeight = w ? `${w}kg` : "—kg";
+    setInquiryWithdrawPreview({ productName, category, productSize, productWeight });
+    setInquiryWithdrawReason("");
+    setInquiryWithdrawSaving(false);
+    setInquiryWithdrawOpen(true);
+  }
+
+  async function saveInquiryWithdraw() {
+    if (workspaceKey !== "ops.inquiry") return;
+    if (inquiryWithdrawSaving) return;
+    if (!inquiryWithdrawRecordId) return;
+    const reason = inquiryWithdrawReason.trim();
+    if (!reason) {
+      alert("请填写撤回理由");
+      return;
+    }
+
+    const row = records.find((r) => r.id === inquiryWithdrawRecordId);
+    const baseData = row ? toRecordStringUnknown(row.data) : {};
+    const nextData: Record<string, unknown> = { ...baseData, 状态: "待选品", 撤回理由: reason };
+
+    setInquiryWithdrawSaving(true);
+    try {
+      const res = await fetch(
+        `/api/workspace/${encodeURIComponent(workspaceKey)}/records/${inquiryWithdrawRecordId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: nextData }),
+        },
+      );
+      if (!res.ok) {
+        alert("撤回失败");
+        return;
+      }
+      setInquiryWithdrawOpen(false);
+      setInquiryWithdrawRecordId(null);
+      setInquiryWithdrawPreview(null);
+      setInquiryWithdrawReason("");
+      await load();
+    } finally {
+      setInquiryWithdrawSaving(false);
+    }
+  }
+
+  function openSelectionAbandon(row: RecordRow) {
+    if (workspaceKey !== "ops.selection") return;
+    setEditing(null);
+    setInquiryCreateOpen(false);
+    setInquiryAssignOpen(false);
+    setInquiryAssignRecordId(null);
+    setInquiryAssignPerson("");
+    setInquiryBulkAssignOpen(false);
+    setInquiryBulkAssignPerson("");
+    setInquiryBulkEditOpen(false);
+    setSelectionAbandonRecordId(row.id);
+    const obj = toRecordStringUnknown(row.data);
+    const productName = String(obj["名称"] ?? obj["商品名称"] ?? "").trim() || "—";
+    const category = String(obj["所属类目"] ?? "").trim() || "—";
+    const pL = String(obj["产品尺寸-长（厘米）"] ?? "").trim();
+    const pW = String(obj["产品尺寸-宽（厘米）"] ?? "").trim();
+    const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
+    const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm` : "—x—x—cm";
+    const w = String(obj["产品重量"] ?? "").trim();
+    const productWeight = w ? `${w}kg` : "—kg";
+    setSelectionAbandonPreview({ productName, category, productSize, productWeight });
+    setSelectionAbandonReason("");
+    setSelectionAbandonSaving(false);
+    setSelectionAbandonOpen(true);
+  }
+
+  async function saveSelectionAbandon() {
+    if (workspaceKey !== "ops.selection") return;
+    if (selectionAbandonSaving) return;
+    if (!selectionAbandonRecordId) return;
+    const reason = selectionAbandonReason.trim();
+    if (!reason) {
+      alert("请填写放弃理由");
+      return;
+    }
+
+    const row = records.find((r) => r.id === selectionAbandonRecordId);
+    const baseData = row ? toRecordStringUnknown(row.data) : {};
+    const nextData: Record<string, unknown> = { ...baseData, 状态: SELECTION_ABANDON_STATUS_VALUE, 放弃理由: reason };
+
+    setSelectionAbandonSaving(true);
+    try {
+      const res = await fetch(
+        `/api/workspace/${encodeURIComponent(workspaceKey)}/records/${selectionAbandonRecordId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: nextData }),
+        },
+      );
+      if (!res.ok) {
+        alert("放弃失败");
+        return;
+      }
+      setSelectionAbandonOpen(false);
+      setSelectionAbandonRecordId(null);
+      setSelectionAbandonPreview(null);
+      setSelectionAbandonReason("");
+      await load();
+    } finally {
+      setSelectionAbandonSaving(false);
+    }
+  }
+
+  async function ensurePricingAssigneesLoaded() {
+    if (pricingAssigneeLoading) return;
+    if (pricingAssigneeOptions.length > 0) return;
+    const currentUsername = typeof session?.user?.username === "string" ? session.user.username : "";
+    const currentRoleName = typeof session?.user?.roleName === "string" ? session.user.roleName : "";
+    setPricingAssigneeLoading(true);
+    try {
+      const res = await fetch("/api/admin/users", { cache: "no-store" });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        const fallback = currentUsername ? [{ username: currentUsername, displayName: currentUsername }] : [];
+        setPricingAssigneeOptions(fallback);
+        alert(typeof err === "string" && err.trim() ? err : "加载运营者失败");
+        return;
+      }
+      const raw = json && typeof json === "object" && "users" in json ? (json as { users?: unknown }).users : null;
+      if (!Array.isArray(raw)) {
+        const fallback = currentUsername ? [{ username: currentUsername, displayName: currentUsername }] : [];
+        setPricingAssigneeOptions(fallback);
+        return;
+      }
+      const list: { username: string; displayName: string }[] = [];
+      for (const it of raw) {
+        const u = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+        const username = u && typeof u.username === "string" ? u.username : "";
+        const displayName = u && typeof u.display_name === "string" ? u.display_name : "";
+        const roleName = u && typeof u.role_name === "string" ? u.role_name : "";
+        const isDisabled = u && typeof u.is_disabled === "number" ? u.is_disabled : 0;
+        if (!username) continue;
+        if (isDisabled) continue;
+        if (roleName !== "运营者") continue;
+        list.push({ username, displayName: displayName || username });
+      }
+      if (list.length === 0 && currentUsername && currentRoleName === "运营者") {
+        list.push({ username: currentUsername, displayName: currentUsername });
+      }
+      setPricingAssigneeOptions(list);
+    } finally {
+      setPricingAssigneeLoading(false);
+    }
+  }
+
+  function openPricingBulkAssign(mode: "bulk" | "single" = "bulk") {
+    if (workspaceKey !== "ops.pricing") return;
+    if (pricingSelectedIds.size === 0) return;
+    if (mode === "bulk" && !canPricingBulkAssign) return;
+    setEditing(null);
+    setInquiryCreateOpen(false);
+    setInquiryAssignOpen(false);
+    setInquiryAssignRecordId(null);
+    setInquiryAssignPerson("");
+    setInquiryWithdrawOpen(false);
+    setInquiryWithdrawRecordId(null);
+    setInquiryWithdrawPreview(null);
+    setInquiryWithdrawReason("");
+    setInquiryBulkAssignOpen(false);
+    setInquiryBulkAssignPerson("");
+    setInquiryBulkEditOpen(false);
+    setInquiryBulkEditIds([]);
+    setInquiryBulkEditSpecs([]);
+    setPricingBulkAssignSaving(false);
+    setPricingBulkAssignPerson("");
+    setPricingBulkAssignOpen(true);
+    void ensurePricingAssigneesLoaded();
+  }
+
+  function openPricingAssign(row: RecordRow) {
+    if (workspaceKey !== "ops.pricing") return;
+    setPricingSelectedIds(new Set([row.id]));
+    openPricingBulkAssign("single");
+  }
+
+  async function savePricingBulkAssign() {
+    if (pricingBulkAssignSaving) return;
+    if (workspaceKey !== "ops.pricing") return;
+    const ids = Array.from(pricingSelectedIds);
+    if (ids.length === 0) return;
+    const assignee = pricingBulkAssignPerson.trim();
+    if (!assignee) {
+      alert("请选择运营者");
+      return;
+    }
+
+    setPricingBulkAssignSaving(true);
+    try {
+      for (const id of ids) {
+        const row = records.find((r) => r.id === id);
+        const baseData = row ? toRecordStringUnknown(row.data) : {};
+        const nextData: Record<string, unknown> = { ...baseData, 运营人员: assignee, 状态: "待核价" };
+
+        const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ data: nextData }),
+        });
+        const json: unknown = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err =
+            json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+          alert(typeof err === "string" && err.trim() ? err : `分配失败（ID: ${id}）`);
+          return;
+        }
+      }
+      setPricingBulkAssignOpen(false);
+      setPricingBulkAssignPerson("");
+      setPricingSelectedIds(new Set());
+      await load();
+    } finally {
+      setPricingBulkAssignSaving(false);
+    }
+  }
+
+  async function updatePricingRowStatus(recordId: number, nextStatus: string) {
+    if (workspaceKey !== "ops.pricing") return;
+    const actionKey = `${recordId}:${nextStatus}`;
+    if (pricingRowAction) return;
+    setPricingRowAction(actionKey);
+    try {
+      const row = records.find((r) => r.id === recordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: nextStatus };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${recordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "更新失败");
+        return;
+      }
+      await load();
+    } finally {
+      setPricingRowAction(null);
+    }
+  }
+
+  function openPricingAbandon(row: RecordRow) {
+    if (workspaceKey !== "ops.pricing") return;
+    const obj = toRecordStringUnknown(row.data);
+    const status = String(obj["状态"] ?? "").trim();
+    if (status === "已放弃" || status === "【核价】已放弃") return;
+    const name = String(obj["名称"] ?? obj["商品名称"] ?? "").trim() || "—";
+    setPricingAbandonRecordId(row.id);
+    setPricingAbandonProductName(name);
+    setPricingAbandonReason("");
+    setPricingAbandonSaving(false);
+    setPricingAbandonOpen(true);
+  }
+
+  async function savePricingAbandon() {
+    if (pricingAbandonSaving) return;
+    if (workspaceKey !== "ops.pricing") return;
+    if (pricingAbandonRecordId == null) return;
+    const reason = pricingAbandonReason.trim();
+    if (!reason) {
+      alert("请填写放弃理由");
+      return;
+    }
+    setPricingAbandonSaving(true);
+    try {
+      const row = records.find((r) => r.id === pricingAbandonRecordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: "【核价】已放弃", 放弃理由: reason };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${pricingAbandonRecordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "放弃失败");
+        return;
+      }
+      setPricingAbandonOpen(false);
+      setPricingAbandonRecordId(null);
+      setPricingAbandonProductName("");
+      setPricingAbandonReason("");
+      await load();
+    } finally {
+      setPricingAbandonSaving(false);
+    }
+  }
+
+  function openPricingWithdraw(row: RecordRow) {
+    if (workspaceKey !== "ops.pricing") return;
+    const obj = toRecordStringUnknown(row.data);
+    const status = String(obj["状态"] ?? "").trim();
+    if (status === "待询价") return;
+    const name = String(obj["名称"] ?? obj["商品名称"] ?? "").trim() || "—";
+    setPricingWithdrawRecordId(row.id);
+    setPricingWithdrawProductName(name);
+    setPricingWithdrawReason("");
+    setPricingWithdrawSaving(false);
+    setPricingWithdrawOpen(true);
+  }
+
+  async function savePricingWithdraw() {
+    if (pricingWithdrawSaving) return;
+    if (workspaceKey !== "ops.pricing") return;
+    if (pricingWithdrawRecordId == null) return;
+    const reason = pricingWithdrawReason.trim();
+    if (!reason) {
+      alert("请填写撤回理由");
+      return;
+    }
+    setPricingWithdrawSaving(true);
+    try {
+      const row = records.find((r) => r.id === pricingWithdrawRecordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: "待询价", 撤回理由: reason, 放弃理由: "" };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${pricingWithdrawRecordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "撤回失败");
+        return;
+      }
+      setPricingWithdrawOpen(false);
+      setPricingWithdrawRecordId(null);
+      setPricingWithdrawProductName("");
+      setPricingWithdrawReason("");
+      await load();
+    } finally {
+      setPricingWithdrawSaving(false);
+    }
+  }
+
+  async function updatePurchaseRowStatus(recordId: number, nextStatus: string) {
+    if (workspaceKey !== "ops.purchase") return;
+    const actionKey = `${recordId}:${nextStatus}`;
+    if (purchaseRowAction) return;
+    setPurchaseRowAction(actionKey);
+    try {
+      const row = records.find((r) => r.id === recordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: nextStatus };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${recordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "更新失败");
+        return;
+      }
+      await load();
+    } finally {
+      setPurchaseRowAction(null);
+    }
+  }
+
+  function openPurchaseWithdraw(row: RecordRow) {
+    if (workspaceKey !== "ops.purchase") return;
+    const obj = toRecordStringUnknown(row.data);
+    const name = String(obj["名称"] ?? obj["商品名称"] ?? "").trim() || "—";
+    setPurchaseWithdrawRecordId(row.id);
+    setPurchaseWithdrawProductName(name);
+    setPurchaseWithdrawReason("");
+    setPurchaseWithdrawSaving(false);
+    setPurchaseWithdrawOpen(true);
+  }
+
+  async function savePurchaseWithdraw() {
+    if (purchaseWithdrawSaving) return;
+    if (workspaceKey !== "ops.purchase") return;
+    if (purchaseWithdrawRecordId == null) return;
+    const reason = purchaseWithdrawReason.trim();
+    if (!reason) {
+      alert("请填写撤回理由");
+      return;
+    }
+    setPurchaseWithdrawSaving(true);
+    try {
+      const row = records.find((r) => r.id === purchaseWithdrawRecordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: "待确品", 撤回理由: reason };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${purchaseWithdrawRecordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "撤回失败");
+        return;
+      }
+      setPurchaseWithdrawOpen(false);
+      setPurchaseWithdrawRecordId(null);
+      setPurchaseWithdrawProductName("");
+      setPurchaseWithdrawReason("");
+      await load();
+    } finally {
+      setPurchaseWithdrawSaving(false);
+    }
+  }
+
+  async function updateConfirmRowStatus(recordId: number, nextStatus: string) {
+    if (workspaceKey !== "ops.confirm") return;
+    const actionKey = `${recordId}:${nextStatus}`;
+    if (confirmRowAction) return;
+    setConfirmRowAction(actionKey);
+    try {
+      const row = records.find((r) => r.id === recordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: nextStatus };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${recordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err =
+          json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "更新失败");
+        return;
+      }
+      await load();
+    } finally {
+      setConfirmRowAction(null);
+    }
+  }
+
+  function openConfirmWithdraw(row: RecordRow) {
+    if (workspaceKey !== "ops.confirm") return;
+    const obj = toRecordStringUnknown(row.data);
+    const name = String(obj["名称"] ?? obj["商品名称"] ?? "").trim() || "—";
+    setConfirmWithdrawRecordId(row.id);
+    setConfirmWithdrawProductName(name);
+    setConfirmWithdrawReason("");
+    setConfirmWithdrawSaving(false);
+    setConfirmWithdrawOpen(true);
+  }
+
+  async function saveConfirmWithdraw() {
+    if (confirmWithdrawSaving) return;
+    if (workspaceKey !== "ops.confirm") return;
+    if (confirmWithdrawRecordId == null) return;
+    const reason = confirmWithdrawReason.trim();
+    if (!reason) {
+      alert("请填写撤回理由");
+      return;
+    }
+    setConfirmWithdrawSaving(true);
+    try {
+      const row = records.find((r) => r.id === confirmWithdrawRecordId);
+      const baseData = row ? toRecordStringUnknown(row.data) : {};
+      const nextData: Record<string, unknown> = { ...baseData, 状态: "待核价", 撤回理由: reason };
+      const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${confirmWithdrawRecordId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: nextData }),
+      });
+      const json: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+        alert(typeof err === "string" && err.trim() ? err : "撤回失败");
+        return;
+      }
+      setConfirmWithdrawOpen(false);
+      setConfirmWithdrawRecordId(null);
+      setConfirmWithdrawProductName("");
+      setConfirmWithdrawReason("");
+      await load();
+    } finally {
+      setConfirmWithdrawSaving(false);
+    }
+  }
+
   function openInquiryBulkEdit() {
     if (workspaceKey !== "ops.inquiry") return;
-    if (inquirySelectedIds.size === 0) return;
+    if (!canInquiryBulkEdit) {
+      if (inquirySelectedIds.size > 0 && inquirySelectedIds.size !== 1) {
+        alert(`批量修改仅支持：选中 1 条；或选中多条且商品名称一致；且状态不为 ${INQUIRY_STATUS_VALUE}`);
+      }
+      return;
+    }
     const ids = Array.from(inquirySelectedIds);
+    const selected = records.filter((r) => inquirySelectedIds.has(r.id));
+    const commonValue = (getter: (obj: Record<string, unknown>) => string) => {
+      if (selected.length === 0) return "";
+      let first = "";
+      for (const r of selected) {
+        const obj = toRecordStringUnknown(r.data) as Record<string, unknown>;
+        const v = getter(obj).trim();
+        if (!first) first = v;
+        else if (v !== first) return "（多条不一致）";
+      }
+      return first;
+    };
     setEditing(null);
     setInquiryCreateOpen(false);
     setInquiryAssignOpen(false);
@@ -1321,6 +2120,7 @@ export function WorkspaceClient({
     setInquiryBulkAssignOpen(false);
     setInquiryBulkAssignPerson("");
     setInquiryBulkEditSaving(false);
+    setInquiryBulkEditAction(null);
     setInquiryBulkEditUnits("cmkg");
     setInquiryBulkEditForm({
       productUnitPrice: "",
@@ -1338,7 +2138,6 @@ export function WorkspaceClient({
     });
     setInquiryBulkEditIds(ids);
     setInquiryBulkEditSpecs(() => {
-      const selected = records.filter((r) => inquirySelectedIds.has(r.id));
       const out: string[] = [];
       const seen = new Set<string>();
       for (const r of selected) {
@@ -1354,6 +2153,22 @@ export function WorkspaceClient({
         }
       }
       return out;
+    });
+    setInquiryBulkEditPreview({
+      productName: commonValue((o) => String(o["名称"] ?? o["商品名称"] ?? "")),
+      category: commonValue((o) => String(o["所属类目"] ?? "")),
+      productUnitPrice: commonValue((o) => String(o["产品单价"] ?? "")),
+      moq: commonValue((o) => String(o["起订量"] ?? "")),
+      discountPolicy: commonValue((o) => String(o["优惠政策"] ?? "")),
+      discountNote: commonValue((o) => String(o["优惠政策备注"] ?? "")),
+      packageLengthCm: commonValue((o) => String(o["包裹尺寸-长（厘米）"] ?? "")),
+      packageWidthCm: commonValue((o) => String(o["包裹尺寸-宽（厘米）"] ?? "")),
+      packageHeightCm: commonValue((o) => String(o["包裹尺寸-高（厘米）"] ?? "")),
+      packageWeightKg: commonValue((o) => String(o["包裹实重（公斤）"] ?? "")),
+      mainProcess: commonValue((o) => String(o["主要工艺"] ?? "")),
+      factoryLocation: commonValue((o) => String(o["工厂所在地"] ?? "")),
+      factoryContact: commonValue((o) => String(o["工厂联系人"] ?? "")),
+      factoryPhone: commonValue((o) => String(o["联系人电话"] ?? "")),
     });
     setInquiryBulkEditOpen(true);
   }
@@ -1391,7 +2206,7 @@ export function WorkspaceClient({
     }
   }
 
-  async function saveInquiryBulkEdit() {
+  async function saveInquiryBulkEdit(mode: "confirm" | "submit") {
     if (inquiryBulkEditSaving) return;
     if (workspaceKey !== "ops.inquiry") return;
     const ids = inquiryBulkEditIds.length > 0 ? inquiryBulkEditIds : Array.from(inquirySelectedIds);
@@ -1426,11 +2241,12 @@ export function WorkspaceClient({
       !!factoryContact ||
       !!factoryPhone;
 
-    if (!hasAnyChange) {
+    if (!hasAnyChange && mode === "confirm") {
       alert("请先填写需要批量修改的字段（留空表示不修改）");
       return;
     }
 
+    setInquiryBulkEditAction(mode);
     setInquiryBulkEditSaving(true);
     try {
       for (const row of selected) {
@@ -1457,7 +2273,9 @@ export function WorkspaceClient({
           }
         }
 
-        const res = await fetch(`/api/workspace/${encodeURIComponent("ops.purchase")}/records/${row.id}`, {
+        if (mode === "submit") nextData["状态"] = "待分配运营者";
+
+        const res = await fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records/${row.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ data: nextData }),
@@ -1493,6 +2311,7 @@ export function WorkspaceClient({
       await load();
     } finally {
       setInquiryBulkEditSaving(false);
+      setInquiryBulkEditAction(null);
     }
   }
 
@@ -1549,7 +2368,6 @@ export function WorkspaceClient({
       const v = obj[f] == null ? "" : String(obj[f]);
       data[f] = v || getDefaultFieldValue(f);
     }
-    if (schema.fields.includes("状态")) data["状态"] = INQUIRY_STATUS_VALUE;
     const drafts: Record<string, string[]> = {};
     if (schema.fields.includes("参考链接")) {
       const links = parseDelimitedValues(data["参考链接"] ?? "");
@@ -1559,8 +2377,57 @@ export function WorkspaceClient({
       const specs = parseDelimitedValues(data["产品规格"] ?? "");
       drafts["产品规格"] = specs.length > 0 ? specs : [""];
     }
+
+    let relatedIds: number[] = [];
+    const specIdMap: Record<string, number[]> = {};
+    const specSlotIds: number[] = [];
+
+    if (workspaceKey === "ops.selection" && row.id && data["名称"]) {
+      const name = data["名称"].trim();
+      const siblings = records
+        .filter((r) => {
+        const d = toRecordStringUnknown(r.data);
+        return String(d["名称"] ?? "").trim() === name;
+        })
+        .sort((a, b) => a.id - b.id);
+      if (siblings.length > 0) {
+        relatedIds = siblings.map((r) => r.id);
+        if (schema.fields.includes("产品规格")) {
+          const slotSpecs: string[] = [];
+          for (const r of siblings) {
+            const d = toRecordStringUnknown(r.data);
+            const s = parseDelimitedValues(String(d["产品规格"] ?? ""));
+            if (s.length === 0) {
+              if (!specIdMap[""]) specIdMap[""] = [];
+              specIdMap[""].push(r.id);
+              slotSpecs.push("");
+              specSlotIds.push(r.id);
+            } else {
+              for (const it of s) {
+                const t = it.trim();
+                if (!t) continue;
+                if (!specIdMap[t]) specIdMap[t] = [];
+                specIdMap[t].push(r.id);
+                slotSpecs.push(t);
+                specSlotIds.push(r.id);
+              }
+            }
+          }
+          const nextSpecs = slotSpecs.length > 0 ? slotSpecs : [""];
+          data["产品规格"] = joinDelimitedValues(nextSpecs);
+          drafts["产品规格"] = nextSpecs;
+        }
+      }
+    }
+
     setLinkDraftByField(drafts);
-    setEditing({ id: row.id, data: applyComputedFields(schema, data) });
+    setEditing({
+      id: row.id,
+      data: applyComputedFields(schema, data),
+      relatedIds: relatedIds.length > 0 ? relatedIds : undefined,
+      specIdMap,
+      specSlotIds: specSlotIds.length > 0 ? specSlotIds : undefined,
+    });
   }
 
   async function uploadImage(file: File) {
@@ -1584,8 +2451,10 @@ export function WorkspaceClient({
     return typeof json.url === "string" ? json.url : null;
   }
 
-  async function saveEdit() {
+  async function saveEdit(statusOrEvent?: string | unknown) {
     if (!editing) return;
+    const overrideStatus = typeof statusOrEvent === "string" ? statusOrEvent : undefined;
+
     if (!schema) {
       let data: Record<string, unknown>;
       try {
@@ -1660,7 +2529,9 @@ export function WorkspaceClient({
     const payload: Record<string, unknown> = {};
     for (const f of schema.fields) payload[f] = editing.data[f] ?? "";
     if (schema.fields.includes("运营人员") && operatorValue) payload["运营人员"] = operatorValue;
-    if (schema.fields.includes("状态")) payload["状态"] = INQUIRY_STATUS_VALUE;
+    const resolvedOverrideStatus =
+      overrideStatus ?? (workspaceKey === "ops.selection" && !editing.id ? "待选品" : null);
+    if (schema.fields.includes("状态") && resolvedOverrideStatus) payload["状态"] = resolvedOverrideStatus;
     if (!editing.id && schema.fields.includes("创建时间")) payload["创建时间"] = formatNow();
     if (schema.fields.includes("最后更新时间")) payload["最后更新时间"] = editing.id ? formatNow() : null;
     if (referenceLinksOverride != null) payload["参考链接"] = referenceLinksOverride;
@@ -1679,7 +2550,7 @@ export function WorkspaceClient({
         specs.push(t);
       }
 
-      if (specs.length > 0) {
+      if (!editing.id && specs.length > 0) {
         const baseUrl = `/api/workspace/${encodeURIComponent(workspaceKey)}/records`;
         for (const spec of specs) {
           const dataForSpec: Record<string, unknown> = {
@@ -1705,6 +2576,88 @@ export function WorkspaceClient({
         await load();
         return;
       }
+    }
+
+    if (workspaceKey === "ops.selection" && editing.relatedIds && editing.relatedIds.length > 0) {
+      const baseUrl = `/api/workspace/${encodeURIComponent(workspaceKey)}/records`;
+
+      const formSpecsRaw = linkDraftByField["产品规格"] ?? parseDelimitedValues(String(payload["产品规格"] ?? ""));
+      const normalizedSpecs = formSpecsRaw
+        .map((it) => String(it ?? "").trim())
+        .filter((it) => it.length > 0);
+      const formSpecs = normalizedSpecs.length > 0 ? normalizedSpecs : [""];
+
+      const existingIds = Array.from(new Set(editing.relatedIds)).sort((a, b) => a - b);
+      const maxLen = Math.max(existingIds.length, formSpecs.length);
+
+      for (let i = 0; i < maxLen; i++) {
+        const id = i < existingIds.length ? existingIds[i] : null;
+        const spec = i < formSpecs.length ? formSpecs[i] : null;
+
+        if (id !== null && spec === null) {
+          const res = await fetch(`${baseUrl}/${id}`, { method: "DELETE" });
+          if (!res.ok && res.status !== 404) {
+            const json = await res.json().catch(() => ({}));
+            const err =
+              json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+            alert(typeof err === "string" && err.trim() ? err : `删除失败 ID ${id}`);
+            return;
+          }
+          continue;
+        }
+
+        if (id === null && spec !== null) {
+          const nextData = { ...payload };
+          if (schema.fields.includes("产品规格")) nextData["产品规格"] = spec;
+          if (schema.fields.includes("产品规则")) nextData["产品规则"] = spec;
+          if (schema.fields.includes("创建时间")) nextData["创建时间"] = formatNow();
+          if (schema.fields.includes("最后更新时间")) nextData["最后更新时间"] = null;
+          if (overrideStatus) nextData["状态"] = overrideStatus;
+
+          const res = await fetch(baseUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: nextData }),
+          });
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            const err =
+              json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+            alert(typeof err === "string" && err.trim() ? err : `创建失败 规格 ${spec}`);
+            return;
+          }
+          continue;
+        }
+
+        if (id !== null && spec !== null) {
+          const existingRow = records.find((r) => r.id === id);
+          const existingObj = existingRow ? toRecordStringUnknown(existingRow.data) : {};
+          const existingStatus = String(existingObj["状态"] ?? "").trim();
+
+          const nextData = { ...payload };
+          if (schema.fields.includes("产品规格")) nextData["产品规格"] = spec;
+          if (schema.fields.includes("产品规则")) nextData["产品规则"] = spec;
+          if (schema.fields.includes("状态") && existingStatus && !overrideStatus) nextData["状态"] = existingStatus;
+          if (overrideStatus) nextData["状态"] = overrideStatus;
+
+          const res = await fetch(`${baseUrl}/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: nextData }),
+          });
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            const err =
+              json && typeof json === "object" && "error" in json ? (json as { error?: unknown }).error : null;
+            alert(typeof err === "string" && err.trim() ? err : `更新失败 ID ${id}`);
+            return;
+          }
+        }
+      }
+
+      setEditing(null);
+      await load();
+      return;
     }
 
     const url = editing.id
@@ -1746,7 +2699,7 @@ export function WorkspaceClient({
       "资质要求",
       "是否有专利风险",
     ]);
-    if (workspaceKey === "ops.purchase") {
+    if (workspaceKey === "ops.purchase" || workspaceKey === "ops.selection") {
       for (const f of PURCHASE_PRODUCT_SIZE_FIELDS) excluded.add(f);
     }
     if (workspaceKey === "ops.inquiry") {
@@ -1756,49 +2709,502 @@ export function WorkspaceClient({
     return list.filter((f) => !excluded.has(f));
   }, [schema, visibleFields, workspaceKey]);
 
-  type EditModalShellProps = {
-    title: ReactNode;
-    dataEditModal: string;
-    onClose: () => void;
-    children: ReactNode;
-  };
+  const selectionStats = useMemo(() => {
+    if (workspaceKey !== "ops.selection") return null;
+    let pendingSelection = 0;
+    let pendingInquiry = 0;
+    let discarded = 0;
+    for (const r of records) {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "");
+      if (status === SELECTION_PENDING_STATUS_VALUE) pendingSelection++;
+      if (status === INQUIRY_STATUS_VALUE) pendingInquiry++;
+      if (status === SELECTION_ABANDON_STATUS_VALUE || status === "已放弃") discarded++;
+    }
+    const total = pendingSelection + pendingInquiry + discarded;
+    const stats: {
+      label: string;
+      value: number;
+      filter: SelectionStatusFilter;
+      icon: typeof Users;
+      color: string;
+      bg: string;
+      borderColor: string;
+      iconBg: string;
+    }[] = [
+      {
+        label: "全部待选商品",
+        value: total,
+        filter: "",
+        icon: Users,
+        color: "text-slate-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-slate-100",
+      },
+      {
+        label: SELECTION_PENDING_STATUS_VALUE,
+        value: pendingSelection,
+        filter: SELECTION_PENDING_STATUS_VALUE,
+        icon: Users,
+        color: "text-slate-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-slate-100",
+      },
+      {
+        label: "待分配【询价】",
+        value: pendingInquiry,
+        filter: "待分配【询价】",
+        icon: Clock,
+        color: "text-orange-500",
+        bg: "bg-white",
+        borderColor: "border-orange-200",
+        iconBg: "bg-orange-50",
+      },
+      {
+        label: SELECTION_ABANDON_STATUS_VALUE,
+        value: discarded,
+        filter: SELECTION_ABANDON_STATUS_VALUE,
+        icon: XCircle,
+        color: "text-red-500",
+        bg: "bg-white",
+        borderColor: "border-red-200",
+        iconBg: "bg-red-50",
+      },
+    ];
+    return stats;
+  }, [records, workspaceKey]);
 
-  function EditModalShell({ title, dataEditModal, onClose, children }: EditModalShellProps) {
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-edit-modal={dataEditModal}>
-        <div className="w-full max-w-4xl rounded-xl border border-border bg-surface p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="text-sm font-medium">{title}</div>
-            <button
-              type="button"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-              title="关闭"
-              onClick={onClose}
-            >
-              ✕
-            </button>
-          </div>
-          {children}
-        </div>
-      </div>
-    );
-  }
+  const selectionFilteredRecords = useMemo(() => {
+    if (workspaceKey !== "ops.selection") return records;
+    if (!selectionStatusFilter) {
+      return records.filter((r) => {
+        const d = toRecordStringUnknown(r.data);
+        const status = String(d["状态"] ?? "").trim();
+        return (
+          status === SELECTION_PENDING_STATUS_VALUE ||
+          status === INQUIRY_STATUS_VALUE ||
+          status === SELECTION_ABANDON_STATUS_VALUE ||
+          status === "已放弃"
+        );
+      });
+    }
+    return records.filter((r) => {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "").trim();
+      if (selectionStatusFilter === SELECTION_ABANDON_STATUS_VALUE) {
+        return status === SELECTION_ABANDON_STATUS_VALUE || status === "已放弃";
+      }
+      return status === selectionStatusFilter;
+    });
+  }, [records, selectionStatusFilter, workspaceKey]);
 
-  function InquiryEditModal({ title, body }: { title: string; body: ReactNode }) {
-    return (
-      <EditModalShell title={title} dataEditModal="inquiry" onClose={() => setEditing(null)}>
-        {body}
-      </EditModalShell>
-    );
-  }
+  const inquiryStats = useMemo(() => {
+    if (workspaceKey !== "ops.inquiry") return null;
+    let total = 0;
+    let pending = 0;
+    let needAssign = 0;
+    let needAssignOperator = 0;
+    for (const r of records) {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "");
+      if (status === "待询价" || status === INQUIRY_STATUS_VALUE || status === "待分配运营者") total++;
+      if (status === "待询价") pending++;
+      if (status === INQUIRY_STATUS_VALUE) needAssign++;
+      if (status === "待分配运营者") needAssignOperator++;
+    }
+    const stats: {
+      label: string;
+      value: number;
+      filter: InquiryStatusFilter;
+      icon: typeof Users;
+      color: string;
+      bg: string;
+      borderColor: string;
+      iconBg: string;
+    }[] = [
+      {
+        label: "全部待询价商品",
+        value: total,
+        filter: "",
+        icon: Users,
+        color: "text-slate-600",
+        bg: "bg-white",
+        borderColor: "border-primary shadow-sm",
+        iconBg: "bg-slate-100",
+      },
+      {
+        label: "待询价",
+        value: pending,
+        filter: "待询价",
+        icon: Clock,
+        color: "text-blue-500",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-blue-50",
+      },
+      {
+        label: INQUIRY_STATUS_VALUE,
+        value: needAssign,
+        filter: INQUIRY_STATUS_VALUE,
+        icon: Clock,
+        color: "text-orange-500",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-orange-50",
+      },
+      {
+        label: "待分配运营者",
+        value: needAssignOperator,
+        filter: "待分配运营者",
+        icon: Clock,
+        color: "text-purple-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-purple-50",
+      },
+    ];
+    return stats;
+  }, [records, workspaceKey]);
 
-  function DefaultEditModal({ title, dataEditModal, body }: { title: string; dataEditModal: string; body: ReactNode }) {
-    return (
-      <EditModalShell title={title} dataEditModal={dataEditModal} onClose={() => setEditing(null)}>
-        {body}
-      </EditModalShell>
-    );
-  }
+  const inquiryFilteredRecords = useMemo(() => {
+    if (workspaceKey !== "ops.inquiry") return records;
+    if (!inquiryStatusFilter) {
+      return records.filter((r) => {
+        const d = toRecordStringUnknown(r.data);
+        const status = String(d["状态"] ?? "").trim();
+        return status === "待询价" || status === INQUIRY_STATUS_VALUE || status === "待分配运营者";
+      });
+    }
+    return records.filter((r) => {
+      const d = toRecordStringUnknown(r.data);
+      return String(d["状态"] ?? "").trim() === inquiryStatusFilter;
+    });
+  }, [inquiryStatusFilter, records, workspaceKey]);
+
+  const pricingStats = useMemo(() => {
+    if (workspaceKey !== "ops.pricing") return null;
+    let total = 0;
+    let pendingPricing = 0;
+    let needAssign = 0;
+    let pendingConfirm = 0;
+    let discarded = 0;
+    for (const r of records) {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "").trim();
+      if (status === "待核价") {
+        total++;
+        pendingPricing++;
+        continue;
+      }
+      if (status === "待分配运营者") {
+        total++;
+        needAssign++;
+        continue;
+      }
+      if (status === "待确品") {
+        total++;
+        pendingConfirm++;
+        continue;
+      }
+      if (status === "【核价】已放弃") {
+        total++;
+        discarded++;
+      }
+    }
+    const stats: {
+      label: string;
+      value: number;
+      filter: PricingStatusFilter;
+      icon: typeof Users;
+      color: string;
+      bg: string;
+      borderColor: string;
+      iconBg: string;
+    }[] = [
+      {
+        label: "全部待核价商品",
+        value: total,
+        filter: "",
+        icon: Users,
+        color: "text-slate-600",
+        bg: "bg-white",
+        borderColor: "border-primary shadow-sm",
+        iconBg: "bg-slate-100",
+      },
+      {
+        label: "待核价",
+        value: pendingPricing,
+        filter: "待核价",
+        icon: Clock,
+        color: "text-purple-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-purple-50",
+      },
+      {
+        label: "待分配运营者",
+        value: needAssign,
+        filter: "待分配运营者",
+        icon: Clock,
+        color: "text-orange-500",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-orange-50",
+      },
+      {
+        label: "待确品",
+        value: pendingConfirm,
+        filter: "待确品",
+        icon: Clock,
+        color: "text-blue-500",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-blue-50",
+      },
+      {
+        label: "【核价】已放弃",
+        value: discarded,
+        filter: "【核价】已放弃",
+        icon: XCircle,
+        color: "text-red-500",
+        bg: "bg-white",
+        borderColor: "border-red-200",
+        iconBg: "bg-red-50",
+      },
+    ];
+    return stats;
+  }, [records, workspaceKey]);
+
+  const pricingFilteredRecords = useMemo(() => {
+    if (workspaceKey !== "ops.pricing") return records;
+    if (!pricingStatusFilter) {
+      return records.filter((r) => {
+        const d = toRecordStringUnknown(r.data);
+        const status = String(d["状态"] ?? "").trim();
+        return (
+          status === "待核价" ||
+          status === "待分配运营者" ||
+          status === "待确品" ||
+          status === "【核价】已放弃"
+        );
+      });
+    }
+    return records.filter((r) => {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "").trim();
+      if (pricingStatusFilter === "【核价】已放弃") return status === "【核价】已放弃";
+      return status === pricingStatusFilter;
+    });
+  }, [pricingStatusFilter, records, workspaceKey]);
+
+  const purchaseStats = useMemo(() => {
+    if (workspaceKey !== "ops.purchase") return null;
+    let pendingPurchase = 0;
+    let pendingShip = 0;
+    let arrived = 0;
+    let shipped = 0;
+    for (const r of records) {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "").trim();
+      if (status === "待采购") pendingPurchase++;
+      else if (status === "待发货") pendingShip++;
+      else if (status === "已到仓") arrived++;
+      else if (status === "已发运") shipped++;
+    }
+    const total = pendingPurchase + pendingShip;
+    const stats: {
+      label: string;
+      value: number;
+      filter: PurchaseStatusFilter;
+      icon: typeof Users;
+      color: string;
+      bg: string;
+      borderColor: string;
+      iconBg: string;
+    }[] = [
+      {
+        label: "全部待采购商品",
+        value: total,
+        filter: "",
+        icon: Users,
+        color: "text-slate-600",
+        bg: "bg-white",
+        borderColor: "border-primary shadow-sm",
+        iconBg: "bg-slate-100",
+      },
+      {
+        label: "待采购",
+        value: pendingPurchase,
+        filter: "待采购",
+        icon: Clock,
+        color: "text-purple-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-purple-50",
+      },
+      {
+        label: "待发货",
+        value: pendingShip,
+        filter: "待发货",
+        icon: Clock,
+        color: "text-orange-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-orange-50",
+      },
+      {
+        label: "已到仓",
+        value: arrived,
+        filter: "已到仓",
+        icon: Clock,
+        color: "text-blue-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-blue-50",
+      },
+      {
+        label: "已发运",
+        value: shipped,
+        filter: "已发运",
+        icon: Clock,
+        color: "text-emerald-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-emerald-50",
+      },
+    ];
+    return stats;
+  }, [records, workspaceKey]);
+
+  const purchaseFilteredRecords = useMemo(() => {
+    if (workspaceKey !== "ops.purchase") return records;
+    if (!purchaseStatusFilter) {
+      return records.filter((r) => {
+        const d = toRecordStringUnknown(r.data);
+        const status = String(d["状态"] ?? "").trim();
+        return status === "待采购" || status === "待发货";
+      });
+    }
+    return records.filter((r) => {
+      const d = toRecordStringUnknown(r.data);
+      return String(d["状态"] ?? "").trim() === purchaseStatusFilter;
+    });
+  }, [purchaseStatusFilter, records, workspaceKey]);
+
+  const confirmStats = useMemo(() => {
+    if (workspaceKey !== "ops.confirm") return null;
+    let pendingConfirm = 0;
+    let needPurchase = 0;
+    let total = 0;
+    for (const r of records) {
+      const d = toRecordStringUnknown(r.data);
+      const status = String(d["状态"] ?? "").trim();
+      if (status === "待确品" || status === "待采购") total++;
+      if (status === "待确品") pendingConfirm++;
+      if (status === "待采购") needPurchase++;
+    }
+    const stats: {
+      label: string;
+      value: number;
+      filter: ConfirmStatusFilter;
+      icon: typeof Users;
+      color: string;
+      bg: string;
+      borderColor: string;
+      iconBg: string;
+    }[] = [
+      {
+        label: "全部待确品商品",
+        value: total,
+        filter: "",
+        icon: Users,
+        color: "text-slate-600",
+        bg: "bg-white",
+        borderColor: "border-primary shadow-sm",
+        iconBg: "bg-slate-100",
+      },
+      {
+        label: "待确品",
+        value: pendingConfirm,
+        filter: "待确品",
+        icon: Clock,
+        color: "text-blue-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-blue-50",
+      },
+      {
+        label: "待采购",
+        value: needPurchase,
+        filter: "待采购",
+        icon: Clock,
+        color: "text-orange-600",
+        bg: "bg-white",
+        borderColor: "border-slate-200",
+        iconBg: "bg-orange-50",
+      },
+    ];
+    return stats;
+  }, [records, workspaceKey]);
+
+  const confirmFilteredRecords = useMemo(() => {
+    if (workspaceKey !== "ops.confirm") return records;
+    if (!confirmStatusFilter) {
+      return records.filter((r) => {
+        const d = toRecordStringUnknown(r.data);
+        const status = String(d["状态"] ?? "").trim();
+        return status === "待确品" || status === "待采购";
+      });
+    }
+    return records.filter((r) => {
+      const d = toRecordStringUnknown(r.data);
+      return String(d["状态"] ?? "").trim() === confirmStatusFilter;
+    });
+  }, [confirmStatusFilter, records, workspaceKey]);
+
+  const inquiryTableExtraFields = useMemo(() => {
+    if (workspaceKey !== "ops.inquiry") return [];
+    const excluded = new Set([
+      "名称",
+      "产品图片",
+      "参考链接",
+      "所属类目",
+      "产品规格",
+      "预计周平均日销量",
+      "建议采购价",
+      "热销月份",
+      "选品逻辑",
+      "产品尺寸-长（厘米）",
+      "产品尺寸-宽（厘米）",
+      "产品尺寸-高（厘米）",
+      "产品重量",
+      "包裹尺寸-长（厘米）",
+      "包裹尺寸-宽（厘米）",
+      "包裹尺寸-高（厘米）",
+      "包裹实重（公斤）",
+      "包裹体积（立方厘米）",
+      "体积重系数",
+      "体积重",
+      "包裹计费重",
+      "包裹计费重（磅）",
+      "包裹尺寸-长（英寸）",
+      "包裹尺寸-宽（英寸）",
+      "包裹尺寸-高（英寸）",
+      "包裹实物包装图",
+      "箱规",
+      "运输包装尺寸-长（厘米）",
+      "运输包装尺寸-宽（厘米）",
+      "运输包装尺寸-高（厘米）",
+      "运输包装体积",
+      "运输包装体积系数",
+      "运输包装体积重",
+      "运输包装实重",
+      "运输包装计费重",
+    ]);
+    return tableFields.filter((f) => !excluded.has(f));
+  }, [tableFields, workspaceKey]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -1819,6 +3225,15 @@ export function WorkspaceClient({
                   新增询价数据
                 </button>
               )}
+              {!secondaryCreateButtonLabel ? null : (
+                <button
+                  type="button"
+                  className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                  onClick={openSecondaryCreate}
+                >
+                  {secondaryCreateButtonLabel}
+                </button>
+              )}
               {hideCreateButton ? null : (
                 <button
                   type="button"
@@ -1830,35 +3245,638 @@ export function WorkspaceClient({
               )}
             </>
           ) : null}
-          <a
-            href={exportUrl}
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
-          >
-            导出Excel
-          </a>
+          {workspaceKey === "ops.selection" ||
+          workspaceKey === "ops.inquiry" ||
+          workspaceKey === "ops.pricing" ||
+          workspaceKey === "ops.purchase" ||
+          workspaceKey === "ops.confirm" ? null : (
+            <a
+              href={exportUrl}
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+            >
+              导出Excel
+            </a>
+          )}
         </div>
       </div>
+
+      {selectionStats ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+          {selectionStats.map((item) => (
+            <button
+              type="button"
+              key={item.label}
+              className={[
+                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                item.bg,
+                item.borderColor,
+                selectionStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+              ].join(" ")}
+              onClick={() => setSelectionStatusFilter(selectionStatusFilter === item.filter ? "" : item.filter)}
+            >
+              <div>
+                <div className="text-sm font-medium text-muted">{item.label}</div>
+                <div className="mt-1 text-2xl font-bold">{item.value}</div>
+              </div>
+              <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                <item.icon className={`h-6 w-6 ${item.color}`} />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {inquiryStats ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+          {inquiryStats.map((item) => (
+            <button
+              type="button"
+              key={item.label}
+              className={[
+                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                item.bg,
+                item.borderColor,
+                inquiryStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+              ].join(" ")}
+              onClick={() => {
+                if (!item.filter) {
+                  setInquiryStatusFilter("");
+                  return;
+                }
+                setInquiryStatusFilter(inquiryStatusFilter === item.filter ? "" : item.filter);
+              }}
+            >
+              <div>
+                <div className="text-sm font-medium text-muted">{item.label}</div>
+                <div className="mt-1 text-2xl font-bold">{item.value}</div>
+              </div>
+              <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                <item.icon className={`h-6 w-6 ${item.color}`} />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {pricingStats ? (
+        <div
+          className={[
+            "grid grid-cols-1 gap-4",
+            pricingStats.length >= 4 ? "sm:grid-cols-4" : "sm:grid-cols-3",
+          ].join(" ")}
+        >
+          {pricingStats.map((item) => (
+            <button
+              type="button"
+              key={item.label}
+              className={[
+                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                item.bg,
+                item.borderColor,
+                pricingStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+              ].join(" ")}
+              onClick={() => {
+                if (!item.filter) {
+                  setPricingStatusFilter("");
+                  return;
+                }
+                setPricingStatusFilter(pricingStatusFilter === item.filter ? "" : item.filter);
+              }}
+            >
+              <div>
+                <div className="text-sm font-medium text-muted">{item.label}</div>
+                <div className="mt-1 text-2xl font-bold">{item.value}</div>
+              </div>
+              <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                <item.icon className={`h-6 w-6 ${item.color}`} />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {purchaseStats ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
+          {purchaseStats.map((item) => (
+            <button
+              type="button"
+              key={item.label}
+              className={[
+                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                item.bg,
+                item.borderColor,
+                purchaseStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+              ].join(" ")}
+              onClick={() => setPurchaseStatusFilter(purchaseStatusFilter === item.filter ? "" : item.filter)}
+            >
+              <div>
+                <div className="text-sm font-medium text-muted">{item.label}</div>
+                <div className="mt-1 text-2xl font-bold">{item.value}</div>
+              </div>
+              <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                <item.icon className={`h-6 w-6 ${item.color}`} />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
+      {confirmStats ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {confirmStats.map((item) => (
+            <button
+              type="button"
+              key={item.label}
+              className={[
+                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                item.bg,
+                item.borderColor,
+                confirmStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+              ].join(" ")}
+              onClick={() => setConfirmStatusFilter(confirmStatusFilter === item.filter ? "" : item.filter)}
+            >
+              <div>
+                <div className="text-sm font-medium text-muted">{item.label}</div>
+                <div className="mt-1 text-2xl font-bold">{item.value}</div>
+              </div>
+              <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                <item.icon className={`h-6 w-6 ${item.color}`} />
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border border-border bg-surface p-4">
         <div className="flex flex-col gap-3">
           {schema ? (
+            workspaceKey === "ops.selection" ? (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={filters["名称"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 名称: e.target.value }))}
+                      placeholder="商品名称"
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <select
+                      value={filters["所属类目"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 所属类目: e.target.value }))}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">时间范围</div>
+                    <select
+                      value={timeRange}
+                      onChange={(e) => {
+                    const next = e.target.value as typeof timeRange;
+                    setTimeRange(next);
+                    if (next !== "custom") {
+                      setCustomStartDate("");
+                      setCustomEndDate("");
+                    }
+                  }}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value="today">今天</option>
+                      <option value="yesterday">昨天</option>
+                      <option value="this_week">本周</option>
+                      <option value="last_week">上周</option>
+                      <option value="this_month">本月</option>
+                      <option value="last_month">上月</option>
+                      <option value="custom">自定义</option>
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      disabled={
+                        loading ||
+                        (timeRange === "custom" &&
+                          (!customStartDate || !customEndDate || customStartDate > customEndDate))
+                      }
+                      className="inline-flex h-10 w-full items-center justify-center rounded-lg border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+                      onClick={load}
+                    >
+                      {loading ? "查询中…" : "查询"}
+                    </button>
+                  </div>
+                </div>
+                {timeRange === "custom" ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">开始日期</div>
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">结束日期</div>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : workspaceKey === "ops.inquiry" ? (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={filters["名称"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 名称: e.target.value }))}
+                      placeholder="商品名称"
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <select
+                      value={filters["所属类目"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 所属类目: e.target.value }))}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">时间范围</div>
+                    <select
+                      value={timeRange}
+                      onChange={(e) => {
+                        const next = e.target.value as "" | "today" | "7d" | "30d" | "custom";
+                        setTimeRange(next);
+                        if (next !== "custom") {
+                          setCustomStartDate("");
+                          setCustomEndDate("");
+                        }
+                      }}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value="today">今天</option>
+                      <option value="7d">7日内</option>
+                      <option value="30d">30天内</option>
+                      <option value="custom">自定义</option>
+                    </select>
+                  </div>
+                </div>
+                {timeRange === "custom" ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">开始日期</div>
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">结束日期</div>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    {canInquiryBulkAssign ? (
+                      <button
+                        type="button"
+                        className={[
+                          "inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm disabled:opacity-50",
+                          inquirySelectedIds.size > 0
+                            ? "border border-primary bg-surface text-primary hover:bg-primary hover:text-white"
+                            : "bg-surface-2 text-muted",
+                        ].join(" ")}
+                        disabled={inquirySelectedIds.size === 0}
+                        onClick={openInquiryBulkAssign}
+                      >
+                        批量分配
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className={[
+                        "inline-flex h-9 items-center justify-center rounded-lg px-4 text-sm disabled:opacity-50",
+                        canInquiryBulkEdit
+                          ? "border border-primary bg-surface text-primary hover:bg-primary hover:text-white"
+                          : "bg-surface-2 text-muted",
+                      ].join(" ")}
+                      disabled={!canInquiryBulkEdit}
+                      title={
+                        canInquiryBulkEdit
+                          ? "批量修改"
+                          : inquirySelectedIds.size === 0
+                            ? "请先选择记录"
+                            : `需选中 1 条；或选中多条且商品名称一致；且状态不为 ${INQUIRY_STATUS_VALUE}`
+                      }
+                      onClick={openInquiryBulkEdit}
+                    >
+                      批量修改数据
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      loading ||
+                      (timeRange === "custom" &&
+                        (!customStartDate || !customEndDate || customStartDate > customEndDate))
+                    }
+                    className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-surface px-6 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
+                    onClick={load}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    {loading ? "查询中…" : "查询"}
+                  </button>
+                </div>
+              </div>
+            ) : workspaceKey === "ops.pricing" ? (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={filters["名称"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 名称: e.target.value }))}
+                      placeholder="商品名称"
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <select
+                      value={filters["所属类目"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 所属类目: e.target.value }))}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">时间范围</div>
+                    <select
+                      value={timeRange}
+                      onChange={(e) => {
+                        const next = e.target.value as "" | "today" | "7d" | "30d" | "custom";
+                        setTimeRange(next);
+                        if (next !== "custom") {
+                          setCustomStartDate("");
+                          setCustomEndDate("");
+                        }
+                      }}
+                      className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value="today">今天</option>
+                      <option value="7d">7日内</option>
+                      <option value="30d">30天内</option>
+                      <option value="custom">自定义</option>
+                    </select>
+                  </div>
+                </div>
+                {timeRange === "custom" ? (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">开始日期</div>
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">结束日期</div>
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between gap-3">
+                  {canSeePricingBulkAssign ? (
+                    <button
+                      type="button"
+                      className={[
+                        "inline-flex h-10 items-center justify-center gap-2 rounded-lg px-4 text-sm disabled:opacity-50",
+                        canPricingBulkAssign ? "bg-primary text-white hover:bg-primary/90" : "bg-surface-2 text-muted",
+                      ].join(" ")}
+                      disabled={!canPricingBulkAssign}
+                      onClick={() => openPricingBulkAssign("bulk")}
+                    >
+                      <Users className="h-4 w-4" />
+                      批量分配{pricingSelectedIds.size > 0 ? `（${pricingSelectedIds.size}）` : ""}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={
+                      loading ||
+                      (timeRange === "custom" &&
+                        (!customStartDate || !customEndDate || customStartDate > customEndDate))
+                    }
+                    className="inline-flex h-10 items-center justify-center rounded-lg bg-primary px-6 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+                    onClick={load}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    {loading ? "查询中…" : "查询"}
+                  </button>
+                </div>
+              </div>
+            ) : workspaceKey === "ops.purchase" ? (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-[1fr_1fr_240px_120px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                      <input
+                        value={filters["名称"] ?? ""}
+                        onChange={(e) => setFilters((prev) => ({ ...prev, 名称: e.target.value }))}
+                        placeholder="商品名称"
+                        className="h-11 w-full rounded-xl border border-border bg-surface pl-10 pr-3 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <select
+                      value={filters["所属类目"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 所属类目: e.target.value }))}
+                      className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted">时间范围</div>
+                    <select
+                      value={timeRange}
+                      onChange={(e) => {
+                        const next = e.target.value as "" | "today" | "7d" | "30d";
+                        setTimeRange(next);
+                      }}
+                      className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value="today">今天</option>
+                      <option value="7d">7日内</option>
+                      <option value="30d">30天内</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    className="inline-flex h-11 items-center justify-center rounded-xl border border-border bg-white px-6 text-sm font-medium text-foreground shadow-sm hover:bg-surface-2 disabled:opacity-50"
+                    onClick={load}
+                  >
+                    {loading ? "查询中…" : "查询"}
+                  </button>
+                </div>
+              </div>
+            ) : workspaceKey === "ops.confirm" ? (
+              <div className="flex flex-col gap-4">
+                <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-[1fr_1fr_240px_140px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+                      <input
+                        value={filters["名称"] ?? ""}
+                        onChange={(e) => setFilters((prev) => ({ ...prev, 名称: e.target.value }))}
+                        placeholder="搜索商品名称..."
+                        className="h-11 w-full rounded-xl border border-border bg-surface pl-10 pr-3 text-sm outline-none"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <select
+                      value={filters["所属类目"] ?? ""}
+                      onChange={(e) => setFilters((prev) => ({ ...prev, 所属类目: e.target.value }))}
+                      className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs text-muted">时间范围</div>
+                    <select
+                      value={timeRange}
+                      onChange={(e) => {
+                        const next = e.target.value as "" | "today" | "7d" | "30d";
+                        setTimeRange(next);
+                      }}
+                      className="h-11 rounded-xl border border-border bg-surface px-3 text-sm outline-none"
+                    >
+                      <option value="">请选择</option>
+                      <option value="today">今天</option>
+                      <option value="7d">7日内</option>
+                      <option value="30d">30天内</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    className="inline-flex h-11 items-center justify-center rounded-xl bg-primary px-6 text-sm font-medium text-white shadow-sm hover:bg-primary/90 disabled:opacity-50"
+                    onClick={load}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    {loading ? "查询中…" : "查询"}
+                  </button>
+                </div>
+              </div>
+            ) : (
             <div className="flex flex-col gap-3">
               <div
                 className={[
                   "grid gap-3",
-                  workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" ? "sm:grid-cols-4" : "sm:grid-cols-3",
+                  workspaceKey === "ops.inquiry" ||
+                  workspaceKey === "ops.purchase" ||
+                  workspaceKey === "ops.selection"
+                    ? "sm:grid-cols-4"
+                    : "sm:grid-cols-3",
                 ].join(" ")}
               >
                 {filterFields.map((f) => (
-                  (workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase") && (f === "名称" || f === "所属类目") ? (
+                  (workspaceKey === "ops.inquiry" ||
+                    workspaceKey === "ops.purchase" ||
+                    workspaceKey === "ops.selection") &&
+                  (f === "名称" || f === "所属类目") ? (
                     <div key={f} className="flex flex-col gap-1">
                       <div className="text-xs text-muted">{displayFieldLabel(f)}</div>
-                      <input
-                        value={filters[f] ?? ""}
-                        onChange={(e) => setFilters((prev) => ({ ...prev, [f]: e.target.value }))}
-                        placeholder={displayFieldLabel(f)}
-                        className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
-                      />
+                      {f === "所属类目" ? (
+                        <select
+                          value={filters[f] ?? ""}
+                          onChange={(e) => setFilters((prev) => ({ ...prev, [f]: e.target.value }))}
+                          className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                        >
+                          <option value="">请选择</option>
+                          {categories.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={filters[f] ?? ""}
+                          onChange={(e) => setFilters((prev) => ({ ...prev, [f]: e.target.value }))}
+                          placeholder={displayFieldLabel(f)}
+                          className="h-10 rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                        />
+                      )}
                     </div>
                   ) : (
                     <input
@@ -1870,7 +3888,7 @@ export function WorkspaceClient({
                     />
                   )
                 ))}
-                {workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" ? (
+                {workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" || workspaceKey === "ops.selection" ? (
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">状态</div>
                     <select
@@ -1881,6 +3899,7 @@ export function WorkspaceClient({
                       <option value="">请选择</option>
                       <option value={INQUIRY_STATUS_VALUE}>{INQUIRY_STATUS_VALUE}</option>
                       <option value="待询价">待询价</option>
+                      <option value="待分配运营者">待分配运营者</option>
                       <option value="待确品">待确品</option>
                       <option value="待分配【采购】">待分配【采购】</option>
                       <option value="待采购">待采购</option>
@@ -1888,7 +3907,7 @@ export function WorkspaceClient({
                     </select>
                   </div>
                 ) : null}
-                {workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" ? (
+                {workspaceKey === "ops.inquiry" || workspaceKey === "ops.purchase" || workspaceKey === "ops.selection" ? (
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">时间范围</div>
                     <select
@@ -1950,20 +3969,39 @@ export function WorkspaceClient({
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   {workspaceKey === "ops.inquiry" ? (
+                    canInquiryBulkAssign ? (
                     <button
                       type="button"
-                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2 disabled:opacity-50"
+                      className={[
+                        "inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm disabled:opacity-50",
+                        inquirySelectedIds.size > 0
+                          ? "border-primary bg-surface text-primary hover:bg-primary hover:text-white"
+                          : "border-border bg-surface hover:bg-surface-2",
+                      ].join(" ")}
                       disabled={inquirySelectedIds.size === 0}
                       onClick={openInquiryBulkAssign}
                     >
                       批量分配询价人{inquirySelectedIds.size > 0 ? `（${inquirySelectedIds.size}）` : ""}
                     </button>
+                    ) : null
                   ) : null}
                   {workspaceKey === "ops.inquiry" ? (
                     <button
                       type="button"
-                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2 disabled:opacity-50"
-                      disabled={inquirySelectedIds.size === 0}
+                      className={[
+                        "inline-flex h-9 items-center justify-center rounded-lg border px-3 text-sm disabled:opacity-50",
+                        canInquiryBulkEdit
+                          ? "border-primary bg-surface text-primary hover:bg-primary hover:text-white"
+                          : "border-border bg-surface hover:bg-surface-2",
+                      ].join(" ")}
+                      disabled={!canInquiryBulkEdit}
+                      title={
+                        canInquiryBulkEdit
+                          ? "批量修改"
+                          : inquirySelectedIds.size === 0
+                            ? "请先选择记录"
+                            : `需选中 1 条；或选中多条且商品名称一致；且状态不为 ${INQUIRY_STATUS_VALUE}`
+                      }
                       onClick={openInquiryBulkEdit}
                     >
                       批量修改数据{inquirySelectedIds.size > 0 ? `（${inquirySelectedIds.size}）` : ""}
@@ -1984,7 +4022,7 @@ export function WorkspaceClient({
                 </button>
               </div>
             </div>
-          ) : (
+          )) : (
             <div className="grid gap-3 sm:grid-cols-3">
               <input
                 value={q}
@@ -2005,6 +4043,1349 @@ export function WorkspaceClient({
 
           <div className="overflow-hidden rounded-lg border border-border">
             {schema ? (
+              workspaceKey === "ops.selection" ? (
+                <div className="overflow-auto">
+                  <table className="min-w-max border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-surface-2 text-xs text-muted">
+                        <th className="whitespace-nowrap border-b border-border px-2 py-2 text-left">商品信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-2 py-2 text-left">参考链接</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">售价 (MIN/MAX)</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">所属类目</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">产品属性 (CM/KG)</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">预计周均日销</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">资质要求</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">专利风险</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">选品逻辑</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">状态</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectionFilteredRecords.length === 0 ? (
+                        <tr>
+                          <td colSpan={11} className="px-3 py-6 text-center text-sm text-muted">
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : (
+                  selectionFilteredRecords.map((row) => {
+                    const d = toRecordStringUnknown(row.data);
+                    const images = parseDelimitedValues(String(d["产品图片"] ?? "")).filter(looksLikeImagePath);
+                    const firstImage = images[0] || "";
+                    const name = String(d["名称"] ?? "—");
+                    const links = parseDelimitedValues(String(d["参考链接"] ?? "")).filter(looksLikeUrl);
+                    const minPrice = String(d["平台在售价格（Min）"] ?? "—");
+                    const maxPrice = String(d["平台在售价格（Max）"] ?? "—");
+                    const category = String(d["所属类目"] ?? "—");
+                    const l = String(d["产品尺寸-长（厘米）"] ?? "");
+                    const w = String(d["产品尺寸-宽（厘米）"] ?? "");
+                    const h = String(d["产品尺寸-高（厘米）"] ?? "");
+                    const size = [l, w, h].filter(Boolean).join("x") || "—";
+                    const weight = String(d["产品重量"] ?? "—");
+                    const specs = String(d["产品规格"] ?? "—");
+                    const weeklySales = String(d["预计周平均日销量"] ?? "—");
+                    const qualification = String(d["资质要求"] ?? "—");
+                    const patentRisk = String(d["是否有专利风险"] ?? "—");
+                    const selectionLogic = String(d["选品逻辑"] ?? "—");
+                    const status = String(d["状态"] ?? "—");
+
+                          return (
+                            <tr key={row.id} className="hover:bg-surface-2">
+                              <td className="border-b border-border px-2 py-2 align-top">
+                                <div className="flex gap-2">
+                                  {firstImage ? (
+                                    <div
+                                      className="relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-lg border border-border bg-surface-2"
+                                      onClick={() => openImageViewer(images, 0)}
+                                    >
+                                      <Image
+                                        src={firstImage}
+                                        alt={name}
+                                        fill
+                                        className="object-cover"
+                                      />
+                                    </div>
+                                  ) : (
+                                    <div className="h-10 w-10 shrink-0 rounded-lg bg-surface-2" />
+                                  )}
+                                  <div>
+                                    <div className="font-medium line-clamp-2 w-40" title={name}>
+                                      {name}
+                                    </div>
+                                    <div className="text-xs text-muted">ID: {row.id}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-2 py-2 align-top">
+                                <div className="flex flex-col gap-1">
+                                  {links.map((link, idx) => (
+                                    <a
+                                      key={idx}
+                                      href={link}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="block max-w-[120px] truncate text-xs text-primary underline"
+                                      title={link}
+                                    >
+                                      {links.length > 1 ? `链接 ${idx + 1}` : "链接"}
+                                    </a>
+                                  ))}
+                                  {links.length === 0 ? <span className="text-muted">—</span> : null}
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top">
+                                <div className="text-sm">
+                                  <div>Min: {minPrice}</div>
+                                  <div>Max: {maxPrice}</div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {category}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top">
+                                <div className="space-y-0.5 text-xs text-muted">
+                                  <div>尺寸: {size}</div>
+                                  <div>重量: {weight}</div>
+                                  <div>规格: {specs}</div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {weeklySales}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {qualification}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {patentRisk === "是" ? (
+                                  <span className="inline-flex items-center rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+                                    是
+                                  </span>
+                                ) : patentRisk === "否" ? (
+                                  <span className="inline-flex items-center rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+                                    否
+                                  </span>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {selectionLogic}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                <div className="flex items-center gap-1.5">
+                                  <div className={`h-2 w-2 rounded-full ${status.includes("待分配") || status.includes("待询价") ? "bg-orange-500" : "bg-gray-300"}`} />
+                                  <span>{status === "已放弃" ? SELECTION_ABANDON_STATUS_VALUE : status}</span>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-right">
+                                <div className="flex justify-end gap-2">
+                                  {(() => {
+                                    const locked =
+                                      status === INQUIRY_STATUS_VALUE ||
+                                      status === SELECTION_ABANDON_STATUS_VALUE ||
+                                      status === "已放弃";
+                                    return (
+                                      <>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
+                                    onClick={() => {
+                                      if (locked) return;
+                                      openEdit(row);
+                                    }}
+                                    disabled={locked}
+                                  >
+                                    修改
+                                  </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-red-300 bg-surface px-3 text-xs text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                                      onClick={() => {
+                                        if (locked) return;
+                                        openSelectionAbandon(row);
+                                      }}
+                                      disabled={locked}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                      放弃
+                                    </button>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : workspaceKey === "ops.inquiry" ? (
+                <div className="overflow-auto">
+                  <table className="min-w-max border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-surface-2 text-xs text-muted">
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <input
+                            type="checkbox"
+                            checked={
+                              inquiryFilteredRecords.length > 0 &&
+                              inquiryFilteredRecords.every((r) => inquirySelectedIds.has(r.id))
+                            }
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setInquirySelectedIds((prev) => {
+                                const next = new Set(prev);
+                                if (!checked) {
+                                  for (const r of inquiryFilteredRecords) next.delete(r.id);
+                                  return next;
+                                }
+                                for (const r of inquiryFilteredRecords) next.add(r.id);
+                                return next;
+                              });
+                            }}
+                            aria-label="全选"
+                          />
+                        </th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">商品信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">参考链接</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">所属类目</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <span>产品属性</span>
+                          <span className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted">CM/KG</span>
+                        </th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <span>包裹属性</span>
+                          <span className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted">CM/KG</span>
+                        </th>
+                        {inquiryTableExtraFields.map((f) => (
+                          <th key={f} className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                            {displayFieldLabel(f)}
+                          </th>
+                        ))}
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {inquiryFilteredRecords.length === 0 ? (
+                        <tr>
+                          <td className="px-3 py-6 text-sm text-muted" colSpan={7 + inquiryTableExtraFields.length}>
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : (
+                        inquiryFilteredRecords.map((row) => {
+                          const obj = toRecordStringUnknown(row.data);
+                          const status = String(obj["状态"] ?? "").trim();
+                          const canWithdraw = status === "待询价";
+                          const name = String(obj["名称"] ?? "").trim() || "—";
+                          const imageRaw = String(obj["产品图片"] ?? "");
+                          const imageUrls = parseImageUrls(imageRaw);
+                          const firstImageUrl = imageUrls[0] ?? "";
+                          const category = String(obj["所属类目"] ?? "").trim() || "—";
+                          const productSpec = String(obj["产品规格"] ?? "").trim();
+                          const pL = String(obj["产品尺寸-长（厘米）"] ?? "").trim();
+                          const pW = String(obj["产品尺寸-宽（厘米）"] ?? "").trim();
+                          const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
+                          const pWeight = String(obj["产品重量"] ?? "").trim();
+                          const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm` : "—";
+                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packWeight = String(obj["包裹实重（公斤）"] ?? "").trim();
+                          const packSize =
+                            packL || packW || packH ? `${packL || "—"}x${packW || "—"}x${packH || "—"}cm` : "—";
+                          const links = parseDelimitedValues(String(obj["参考链接"] ?? "")).filter(looksLikeUrl);
+                          return (
+                            <tr key={row.id} className="border-b border-border">
+                              <td className="border-b border-border px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={inquirySelectedIds.has(row.id)}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setInquirySelectedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(row.id);
+                                      else next.delete(row.id);
+                                      return next;
+                                    });
+                                  }}
+                                  aria-label={`选择 ID ${row.id}`}
+                                />
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top">
+                                <div className="flex items-start gap-2">
+                                  {firstImageUrl && looksLikeImagePath(firstImageUrl) ? (
+                                    <a
+                                      href={firstImageUrl}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openImageViewer(imageUrls, 0);
+                                      }}
+                                      title={imageUrls.join("\n")}
+                                      className="shrink-0"
+                                    >
+                                      <Image
+                                        src={firstImageUrl}
+                                        alt={name}
+                                        width={44}
+                                        height={44}
+                                        className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
+                                      />
+                                    </a>
+                                  ) : (
+                                    <div className="h-11 w-11 shrink-0 rounded-lg border border-border bg-surface-2" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="max-w-[180px] truncate font-medium">{name}</div>
+                                    <div className="text-xs text-muted">ID：{row.id}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {links.length === 0 ? (
+                                  <span className="text-muted">—</span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-x-2 gap-y-1">
+                                    {links.map((u, idx) => (
+                                      <a
+                                        key={`${u}-${idx}`}
+                                        className="text-foreground underline"
+                                        href={u}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        title={u}
+                                      >
+                                        {links.length > 1 ? `链接${idx + 1}` : "链接"}
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm text-muted">{category}</td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="text-foreground">{productSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：<span className="text-foreground">{pWeight ? `${pWeight}kg` : "—"}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    规格：<span className="text-foreground">{productSpec || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="text-foreground">{packSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：<span className="text-foreground">{packWeight ? `${packWeight}kg` : "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              {inquiryTableExtraFields.map((f) => {
+                                const v = obj[f] == null ? "" : String(obj[f]);
+                                const kind = getFieldKind(f);
+                                const extraImageUrls = kind === "image" ? parseImageUrls(v) : [];
+                                const extraFirstImageUrl = extraImageUrls[0] ?? "";
+                                return (
+                                  <td
+                                    key={f}
+                                    className={
+                                      kind === "image"
+                                        ? "border-b border-border px-3 py-2 align-top"
+                                        : "max-w-[220px] truncate border-b border-border px-3 py-2 align-top text-muted"
+                                    }
+                                  >
+                                    {kind === "image" && extraFirstImageUrl && looksLikeImagePath(extraFirstImageUrl) ? (
+                                      <a
+                                        href={extraFirstImageUrl}
+                                        className="inline-flex cursor-pointer items-center gap-2 text-foreground"
+                                        title={extraImageUrls.join("\n")}
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
+                                          openImageViewer(extraImageUrls, 0);
+                                        }}
+                                      >
+                                        <Image
+                                          src={extraFirstImageUrl}
+                                          alt={displayFieldLabel(f)}
+                                          width={40}
+                                          height={40}
+                                          className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-surface-2 object-cover"
+                                        />
+                                        <span className="cursor-pointer text-xs underline">
+                                          {extraImageUrls.length > 1 ? `查看（${extraImageUrls.length}）` : "查看"}
+                                        </span>
+                                      </a>
+                                    ) : kind === "url" ? (
+                                      (() => {
+                                        const urlList = parseDelimitedValues(v).filter(looksLikeUrl);
+                                        if (urlList.length === 0) return v || "—";
+                                        return (
+                                          <div className="flex flex-wrap gap-x-2 gap-y-1">
+                                            {urlList.map((u, idx) => (
+                                              <a
+                                                key={`${u}-${idx}`}
+                                                className="text-foreground underline"
+                                                href={u}
+                                                target="_blank"
+                                                rel="noreferrer"
+                                                title={u}
+                                              >
+                                                {urlList.length > 1 ? `链接${idx + 1}` : "链接"}
+                                              </a>
+                                            ))}
+                                          </div>
+                                        );
+                                      })()
+                                    ) : (
+                                      v || "—"
+                                    )}
+                                  </td>
+                                );
+                              })}
+                              <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right align-top">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                    onClick={() => openEdit(row)}
+                                  >
+                                    修改
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={[
+                                      "inline-flex h-8 items-center justify-center gap-1 rounded-lg border bg-surface px-3 text-xs disabled:opacity-50",
+                                      canWithdraw ? "border-red-300 text-red-500 hover:bg-red-50" : "border-border text-muted",
+                                    ].join(" ")}
+                                    onClick={() => openInquiryWithdraw(row)}
+                                    disabled={!canWithdraw}
+                                    title={canWithdraw ? "撤回" : "仅状态为“待询价”可撤回"}
+                                  >
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                    撤回
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : workspaceKey === "ops.pricing" ? (
+                <div className="overflow-auto">
+                  <table className="min-w-max border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-surface-2 text-xs text-muted">
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <input
+                            type="checkbox"
+                            checked={
+                              pricingFilteredRecords.length > 0 &&
+                              pricingFilteredRecords.every((r) => pricingSelectedIds.has(r.id))
+                            }
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setPricingSelectedIds((prev) => {
+                                const next = new Set(prev);
+                                if (!checked) {
+                                  for (const r of pricingFilteredRecords) next.delete(r.id);
+                                  return next;
+                                }
+                                for (const r of pricingFilteredRecords) next.add(r.id);
+                                return next;
+                              });
+                            }}
+                            aria-label="全选"
+                          />
+                        </th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">商品信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">参考链接</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">类目</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <span>产品属性</span>
+                          <button
+                            type="button"
+                            className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted hover:bg-surface-2"
+                            onClick={() => setPricingUnits((prev) => (prev === "cmkg" ? "inlb" : "cmkg"))}
+                          >
+                            {pricingUnits === "cmkg" ? "CM/KG" : "IN/LB"}
+                          </button>
+                        </th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <span>包裹属性</span>
+                          <button
+                            type="button"
+                            className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted hover:bg-surface-2"
+                            onClick={() => setPricingUnits((prev) => (prev === "cmkg" ? "inlb" : "cmkg"))}
+                          >
+                            {pricingUnits === "cmkg" ? "CM/KG" : "IN/LB"}
+                          </button>
+                        </th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">成本总计（RMB）</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">TEUM供货价</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          参考销售售价（MIN，MAX）
+                        </th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">选品逻辑</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">状态</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {pricingFilteredRecords.length === 0 ? (
+                        <tr>
+                          <td className="px-3 py-6 text-sm text-muted" colSpan={12}>
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : (
+                        pricingFilteredRecords.map((row) => {
+                          const obj = toRecordStringUnknown(row.data);
+                          const name = String(obj["名称"] ?? "").trim() || "—";
+                          const category = String(obj["所属类目"] ?? "").trim();
+                          const imageRaw = String(obj["产品图片"] ?? "");
+                          const imageUrls = parseImageUrls(imageRaw);
+                          const firstImageUrl = imageUrls[0] ?? "";
+                          const links = parseDelimitedValues(String(obj["参考链接"] ?? "")).filter(looksLikeUrl);
+
+                          const pL = String(obj["产品尺寸-长（厘米）"] ?? "").trim();
+                          const pW = String(obj["产品尺寸-宽（厘米）"] ?? "").trim();
+                          const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
+                          const pWeight = String(obj["产品重量"] ?? "").trim();
+                          const productSpec = String(obj["产品规格"] ?? "").trim();
+                          const productSize =
+                            pL || pW || pH
+                              ? pricingUnits === "cmkg"
+                                ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm`
+                                : `${cmToInchesValue(pL) ?? "—"}x${cmToInchesValue(pW) ?? "—"}x${cmToInchesValue(pH) ?? "—"}in`
+                              : "—";
+
+                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packWeight = String(obj["包裹计费重"] ?? "").trim() || String(obj["包裹实重（公斤）"] ?? "").trim();
+                          const packSize =
+                            packL || packW || packH
+                              ? pricingUnits === "cmkg"
+                                ? `${packL || "—"}x${packW || "—"}x${packH || "—"}cm`
+                                : `${cmToInchesValue(packL) ?? "—"}x${cmToInchesValue(packW) ?? "—"}x${cmToInchesValue(packH) ?? "—"}in`
+                              : "—";
+
+                          const costTotal = String(obj["成本总计"] ?? "").trim();
+                          const costPurchase = String(obj["采购成本"] ?? "").trim();
+                          const costHead = String(obj["头程成本"] ?? "").trim();
+                          const costTail = String(obj["尾程成本（人民币）"] ?? "").trim();
+                          const costNegative = String(obj["负向成本"] ?? "").trim();
+
+                          const temuQuote = String(obj["temu报价"] ?? "").trim();
+                          const minPrice = String(obj["平台在售价格（Min）"] ?? "").trim();
+                          const maxPrice = String(obj["平台在售价格（Max）"] ?? "").trim();
+                          const priceRange = minPrice && maxPrice ? `${minPrice} - ${maxPrice}` : minPrice || maxPrice || "";
+
+                          const logic = String(obj["选品逻辑"] ?? "").trim();
+                          const status = String(obj["状态"] ?? "").trim();
+                          const busy = pricingRowAction ? pricingRowAction.startsWith(`${row.id}:`) : false;
+                          const statusClassName =
+                            status === "待核价"
+                              ? "bg-orange-50 text-orange-600 border-orange-200"
+                              : status === "待分配运营者"
+                                ? "bg-blue-50 text-blue-600 border-blue-200"
+                                : status === "【核价】已放弃"
+                                  ? "bg-red-50 text-red-600 border-red-200"
+                                  : "bg-surface-2 text-muted border-border";
+
+                          return (
+                            <tr key={row.id} className="border-b border-border">
+                              <td className="border-b border-border px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={pricingSelectedIds.has(row.id)}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setPricingSelectedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(row.id);
+                                      else next.delete(row.id);
+                                      return next;
+                                    });
+                                  }}
+                                  aria-label={`选择 ID ${row.id}`}
+                                />
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top">
+                                <div className="flex items-start gap-2">
+                                  {firstImageUrl && looksLikeImagePath(firstImageUrl) ? (
+                                    <a
+                                      href={firstImageUrl}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openImageViewer(imageUrls, 0);
+                                      }}
+                                      title={imageUrls.join("\n")}
+                                      className="shrink-0"
+                                    >
+                                      <Image
+                                        src={firstImageUrl}
+                                        alt={name}
+                                        width={44}
+                                        height={44}
+                                        className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
+                                      />
+                                    </a>
+                                  ) : (
+                                    <div className="h-11 w-11 shrink-0 rounded-lg border border-border bg-surface-2" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="max-w-[180px] truncate font-medium">{name}</div>
+                                    <div className="text-xs text-muted">ID：{row.id}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                {links.length === 0 ? (
+                                  <span className="text-muted">—</span>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    {links.map((u, idx) => (
+                                      <a
+                                        key={`${u}-${idx}`}
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-foreground hover:bg-surface-2"
+                                        href={u}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        title={u}
+                                        aria-label={links.length > 1 ? `打开链接${idx + 1}` : "打开链接"}
+                                      >
+                                        <ExternalLink className="h-4 w-4" />
+                                      </a>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm text-muted">
+                                {category || "—"}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="text-foreground">{productSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：
+                                    <span className="text-foreground">
+                                      {pWeight
+                                        ? pricingUnits === "cmkg"
+                                          ? `${pWeight}kg`
+                                          : `${kgToLbValue(pWeight) ?? "—"}lb`
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                  <div className="text-muted">
+                                    规格：<span className="text-foreground">{productSpec || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="text-foreground">{packSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：
+                                    <span className="text-foreground">
+                                      {packWeight
+                                        ? pricingUnits === "cmkg"
+                                          ? `${packWeight}kg`
+                                          : `${kgToLbValue(packWeight) ?? "—"}lb`
+                                        : "—"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm">
+                                <div className="flex flex-col gap-2">
+                                  <div className="font-medium">{costTotal || "—"}</div>
+                                  <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-muted">
+                                    <div>
+                                      采购：<span className="text-foreground">{costPurchase || "—"}</span>
+                                    </div>
+                                    <div>
+                                      头程：<span className="text-foreground">{costHead || "—"}</span>
+                                    </div>
+                                    <div>
+                                      尾程：<span className="text-foreground">{costTail || "—"}</span>
+                                    </div>
+                                    <div>
+                                      负向：<span className="text-foreground">{costNegative || "—"}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm text-muted">
+                                {temuQuote || "—"}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm text-muted">
+                                {priceRange || "—"}
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top text-sm text-muted">
+                                <div className="max-w-[220px] truncate">{logic || "—"}</div>
+                              </td>
+                              <td className="border-b border-border px-3 py-2 align-top">
+                                <span className={["inline-flex items-center rounded-full border px-2 py-0.5 text-xs", statusClassName].join(" ")}>
+                                  {status || "—"}
+                                </span>
+                              </td>
+                              <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right align-top">
+                                <div className="flex justify-end gap-2">
+                                  {status === "待核价" ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 disabled:opacity-50"
+                                        onClick={() => updatePricingRowStatus(row.id, "待确品")}
+                                        disabled={busy}
+                                        aria-label="确品"
+                                        title="确品"
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-50"
+                                        onClick={() => openPricingAbandon(row)}
+                                        disabled={busy}
+                                        aria-label="放弃"
+                                        title="放弃"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-muted hover:bg-surface-2 disabled:opacity-50"
+                                        onClick={() => openPricingWithdraw(row)}
+                                        disabled={busy}
+                                        aria-label="撤回"
+                                        title="撤回"
+                                      >
+                                        <RotateCcw className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  ) : status === "已放弃" || status === "【核价】已放弃" ? (
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-surface px-3 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
+                                      onClick={() => updatePricingRowStatus(row.id, "待核价")}
+                                      disabled={busy}
+                                    >
+                                      <RotateCcw className="h-3.5 w-3.5" />
+                                      撤回
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 disabled:opacity-50"
+                                        onClick={() => updatePricingRowStatus(row.id, "待确品")}
+                                        disabled={busy}
+                                        aria-label="确品"
+                                        title="确品"
+                                      >
+                                        <Check className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-50"
+                                        onClick={() => openPricingAbandon(row)}
+                                        disabled={busy}
+                                        aria-label="放弃"
+                                        title="放弃"
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-muted hover:bg-surface-2 disabled:opacity-50"
+                                        onClick={() => openPricingWithdraw(row)}
+                                        disabled={busy}
+                                        aria-label="撤回"
+                                        title="撤回"
+                                      >
+                                        <RotateCcw className="h-4 w-4" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : workspaceKey === "ops.purchase" ? (
+                <div className="overflow-auto">
+                  <table className="min-w-max border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-surface-2 text-xs text-muted">
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">ID</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">基本信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">SKU信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">产品属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">包裹属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">发货信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">实际包裹属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">下单数</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">订单总额</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">采购成本</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">发货安排</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">状态</th>
+                        <th className="sticky right-0 whitespace-nowrap border-b border-border bg-surface-2 px-4 py-3 text-right">
+                          下单操作
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {purchaseFilteredRecords.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-10 text-sm text-muted" colSpan={13}>
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : (
+                        purchaseFilteredRecords.map((row) => {
+                          const obj = toRecordStringUnknown(row.data);
+                          const id = row.id;
+
+                          const name = String(obj["名称"] ?? "").trim() || "—";
+                          const category = String(obj["所属类目"] ?? "").trim();
+                          const imageRaw = String(obj["产品图片"] ?? "");
+                          const imageUrls = parseImageUrls(imageRaw);
+                          const firstImageUrl = imageUrls[0] ?? "";
+
+                          const companyCode = String(obj["公司编码"] ?? "").trim();
+                          const warehouseCode = String(obj["仓库编码"] ?? "").trim();
+                          const platformCode = String(obj["平台编码"] ?? "").trim();
+
+                          const pL = String(obj["产品尺寸-长（厘米）"] ?? "").trim();
+                          const pW = String(obj["产品尺寸-宽（厘米）"] ?? "").trim();
+                          const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
+                          const pWeight = String(obj["产品重量"] ?? "").trim();
+                          const productSpec = String(obj["产品规格"] ?? "").trim();
+                          const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm` : "—";
+
+                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packWeight = String(obj["包裹计费重"] ?? "").trim() || String(obj["包裹实重（公斤）"] ?? "").trim();
+                          const packSize = packL || packW || packH ? `${packL || "—"}x${packW || "—"}x${packH || "—"}cm` : "—";
+
+                          const planQty = String(obj["计划采购量"] ?? "").trim();
+                          const usWarehouse = String(obj["美西仓"] ?? "").trim();
+                          const usEastWarehouse = String(obj["美东仓"] ?? "").trim();
+                          const szWarehouse = String(obj["深圳仓"] ?? "").trim();
+
+                          const actualPackL = String(obj["运输包装尺寸-长（厘米）"] ?? "").trim();
+                          const actualPackW = String(obj["运输包装尺寸-宽（厘米）"] ?? "").trim();
+                          const actualPackH = String(obj["运输包装尺寸-高（厘米）"] ?? "").trim();
+                          const actualPackWeight = String(obj["运输包装实重"] ?? "").trim();
+                          const actualPackSize =
+                            actualPackL || actualPackW || actualPackH
+                              ? `${actualPackL || "—"}x${actualPackW || "—"}x${actualPackH || "—"}cm`
+                              : "—x—x—cm";
+
+                          const orderQty = String(obj["下单数"] ?? "").trim();
+                          const orderAmount = String(obj["付款明细-订单总金额"] ?? "").trim() || String(obj["订单金额/付款方式"] ?? "").trim();
+
+                          const costPurchase = String(obj["采购成本"] ?? "").trim();
+                          const prepay = String(obj["预付"] ?? "").trim();
+                          const finalPay = String(obj["尾款"] ?? "").trim();
+                          const freight = String(obj["运费"] ?? "").trim();
+
+                          const contractNo = String(obj["阿里订单号"] ?? "").trim();
+                          const deliveryDate = String(obj["交期明细-交货日期"] ?? "").trim();
+                          const shipPlan = String(obj["发货安排套/箱"] ?? "").trim();
+
+                          const status = String(obj["状态"] ?? "").trim();
+                          const busy = purchaseRowAction ? purchaseRowAction.startsWith(`${row.id}:`) : false;
+
+                          const statusDotClassName =
+                            status === "待发货"
+                              ? "bg-amber-500"
+                              : status === "已到仓"
+                                ? "bg-emerald-500"
+                                : status === "已发运"
+                                  ? "bg-purple-500"
+                                  : "bg-slate-300";
+
+                          return (
+                            <tr key={row.id} className="border-b border-border">
+                              <td className="border-b border-border px-4 py-3 align-top text-sm text-muted">
+                                ID: {id}
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top">
+                                <div className="flex items-start gap-2">
+                                  {firstImageUrl && looksLikeImagePath(firstImageUrl) ? (
+                                    <a
+                                      href={firstImageUrl}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openImageViewer(imageUrls, 0);
+                                      }}
+                                      title={imageUrls.join("\n")}
+                                      className="shrink-0"
+                                    >
+                                      <Image
+                                        src={firstImageUrl}
+                                        alt={name}
+                                        width={44}
+                                        height={44}
+                                        className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
+                                      />
+                                    </a>
+                                  ) : (
+                                    <div className="h-11 w-11 shrink-0 rounded-lg border border-border bg-surface-2" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="max-w-[240px] truncate font-semibold text-foreground">{name}</div>
+                                    <div className="mt-1 text-xs text-muted">{category || "—"}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">
+                                    公司编码：<span className="font-semibold text-primary">{companyCode || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    仓库编码：<span className="font-semibold text-primary">{warehouseCode || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    平台编码：<span className="font-semibold text-primary">{platformCode || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="font-semibold text-primary">{productSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：<span className="font-semibold text-primary">{pWeight ? `${pWeight}kg` : "—"}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    规格：<span className="font-semibold text-primary">{productSpec || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="font-semibold text-primary">{packSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：<span className="font-semibold text-primary">{packWeight ? `${packWeight}kg` : "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-2">
+                                  <div className="rounded-md bg-surface-2 px-3 py-2">
+                                    <div className="text-xs text-muted">计划：</div>
+                                    <div className="mt-1 text-sm font-semibold text-primary">{planQty || "—"}</div>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    {[
+                                      usWarehouse ? `美西仓: ${usWarehouse}` : "",
+                                      usEastWarehouse ? `美东仓: ${usEastWarehouse}` : "",
+                                      szWarehouse ? `深圳仓: ${szWarehouse}` : "",
+                                    ]
+                                      .filter(Boolean)
+                                      .join("，") || "—"}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="font-semibold text-primary">{actualPackSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：<span className="font-semibold text-primary">{actualPackWeight ? `${actualPackWeight}kg` : "—kg"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">
+                                    总数：<span className="font-semibold text-foreground">{orderQty || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    剩余/：<span className="text-foreground">{String(obj["剩余未交数量"] ?? "").trim() || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    备注：<span className="text-foreground">{String(obj["其他备注"] ?? "").trim() || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">
+                                    总额：<span className="font-semibold text-foreground">{orderAmount ? `¥${orderAmount.replace(/^¥/, "")}` : "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    单/箱：<span className="text-foreground">{String(obj["产品单价"] ?? "").trim() || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">
+                                    预付：<span className={prepay ? "text-emerald-600" : "text-muted"}>{prepay ? "✓" : "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    尾款：<span className={finalPay ? "text-emerald-600" : "text-muted"}>{finalPay ? "✓" : "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    运费：<span className={freight ? "text-emerald-600" : "text-muted"}>{freight ? "✓" : "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    成本：<span className="text-foreground">{costPurchase ? `¥${costPurchase}` : "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">
+                                    合同：<span className="text-foreground">{contractNo || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    日期：<span className="text-foreground">{deliveryDate || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    计划：<span className="text-foreground">{shipPlan || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className={`h-2 w-2 rounded-full ${statusDotClassName}`} />
+                                  <span className="font-medium text-foreground">{status || "—"}</span>
+                                </div>
+                              </td>
+                              <td className="sticky right-0 whitespace-nowrap border-b border-border bg-surface px-4 py-3 text-right align-top">
+                                <div className="flex items-center justify-end gap-2">
+                                  <span className="text-xs text-muted">备注</span>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                    onClick={() => openEdit(row)}
+                                  >
+                                    修改
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                    disabled={busy}
+                                    onClick={() => openPurchaseWithdraw(row)}
+                                  >
+                                    撤回
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : workspaceKey === "ops.confirm" ? (
+                <div className="overflow-auto">
+                  <table className="min-w-max border-separate border-spacing-0">
+                    <thead>
+                      <tr className="bg-surface-2 text-xs text-muted">
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">商品基本信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">产品属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">包裹属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">成本总计（RMB）</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">TEUM供货价</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">参考销售售价</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">SKU信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">发货信息</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">销量预估</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">实际下单数</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">订单总数</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">交货周期</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">发货日期</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">发货数量</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">状态</th>
+                        <th className="sticky right-0 whitespace-nowrap border-b border-border bg-surface-2 px-4 py-3 text-right">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody className="text-sm">
+                      {confirmFilteredRecords.length === 0 ? (
+                        <tr>
+                          <td className="px-4 py-10 text-sm text-muted" colSpan={16}>
+                            暂无数据
+                          </td>
+                        </tr>
+                      ) : (
+                        confirmFilteredRecords.map((row) => {
+                          const obj = toRecordStringUnknown(row.data);
+                          const name = String(obj["名称"] ?? "").trim() || "—";
+                          const category = String(obj["所属类目"] ?? "").trim();
+                          const imageRaw = String(obj["产品图片"] ?? "");
+                          const imageUrls = parseImageUrls(imageRaw);
+                          const firstImageUrl = imageUrls[0] ?? "";
+                          const links = parseDelimitedValues(String(obj["参考链接"] ?? "")).filter(looksLikeUrl);
+
+                          const pL = String(obj["产品尺寸-长（厘米）"] ?? "").trim();
+                          const pW = String(obj["产品尺寸-宽（厘米）"] ?? "").trim();
+                          const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
+                          const pWeight = String(obj["产品重量"] ?? "").trim();
+                          const productSpec = String(obj["产品规格"] ?? "").trim();
+                          const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"} cm` : "—";
+
+                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packWeight = String(obj["包裹计费重"] ?? "").trim() || String(obj["包裹实重（公斤）"] ?? "").trim();
+                          const packSize = packL || packW || packH ? `${packL || "—"}x${packW || "—"}x${packH || "—"} cm` : "—";
+
+                          const costTotal = String(obj["成本总计"] ?? "").trim();
+                          const costPurchase = String(obj["采购成本"] ?? "").trim();
+                          const costHead = String(obj["头程成本"] ?? "").trim();
+                          const costTail = String(obj["尾程成本（人民币）"] ?? "").trim();
+                          const costNegative = String(obj["负向成本"] ?? "").trim();
+
+                          const temuQuote = String(obj["temu报价"] ?? "").trim();
+                          const minPrice = String(obj["平台在售价格（Min）"] ?? "").trim();
+                          const maxPrice = String(obj["平台在售价格（Max）"] ?? "").trim();
+                          const priceRange = minPrice && maxPrice ? `${minPrice} - ${maxPrice}` : minPrice || maxPrice || "";
+
+                          const planQty = String(obj["计划采购量"] ?? "").trim();
+                          const usWarehouse = String(obj["美西仓"] ?? "").trim();
+                          const usEastWarehouse = String(obj["美东仓"] ?? "").trim();
+                          const szWarehouse = String(obj["深圳仓"] ?? "").trim();
+                          const forecast = String(obj["预估销量"] ?? "").trim();
+                          const forecastSource = String(obj["预估来源"] ?? "").trim();
+                          const actualOrder = String(obj["实际下单数"] ?? "").trim();
+                          const orderTotal = String(obj["订单总数"] ?? "").trim();
+                          const deliveryCycle = String(obj["交货周期"] ?? "").trim();
+                          const shipDate = String(obj["发货日期"] ?? "").trim();
+                          const shipQty = String(obj["发货数量"] ?? "").trim();
+                          const companyCode = String(obj["公司编码"] ?? "").trim();
+                          const warehouseCode = String(obj["仓库编码"] ?? "").trim();
+                          const platformCode = String(obj["平台编码"] ?? "").trim();
+
+                          const status = String(obj["状态"] ?? "").trim();
+                          const busy = confirmRowAction ? confirmRowAction.startsWith(`${row.id}:`) : false;
+                          const statusDotClassName =
+                            status === "待确品"
+                              ? "bg-orange-500"
+                              : status === "待采购"
+                                ? "bg-blue-500"
+                                : status === "已到仓"
+                                  ? "bg-emerald-500"
+                                  : status === "已放弃"
+                                    ? "bg-red-500"
+                                    : "bg-slate-300";
+
+                          return (
+                            <tr key={row.id} className="border-b border-border">
+                              <td className="border-b border-border px-4 py-3 align-top">
+                                <div className="flex items-start gap-2">
+                                  {firstImageUrl && looksLikeImagePath(firstImageUrl) ? (
+                                    <a
+                                      href={firstImageUrl}
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        openImageViewer(imageUrls, 0);
+                                      }}
+                                      title={imageUrls.join("\n")}
+                                      className="shrink-0"
+                                    >
+                                      <Image
+                                        src={firstImageUrl}
+                                        alt={name}
+                                        width={44}
+                                        height={44}
+                                        className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
+                                      />
+                                    </a>
+                                  ) : (
+                                    <div className="h-11 w-11 shrink-0 rounded-lg border border-border bg-surface-2" />
+                                  )}
+                                  <div className="min-w-0">
+                                    <div className="max-w-[220px] truncate font-semibold text-foreground">{name}</div>
+                                    <div className="mt-1 text-xs text-muted">
+                                      ID：{row.id}
+                                      {category ? ` ｜ ${category}` : ""}
+                                    </div>
+                                    {links.length === 0 ? null : (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        {links.map((u, idx) => (
+                                          <a
+                                            key={`${u}-${idx}`}
+                                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface text-foreground hover:bg-surface-2"
+                                            href={u}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            title={u}
+                                            aria-label={links.length > 1 ? `打开链接${idx + 1}` : "打开链接"}
+                                          >
+                                            <ExternalLink className="h-4 w-4" />
+                                          </a>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="font-medium text-primary">{productSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：
+                                    <span className="font-medium text-primary">{pWeight ? `${pWeight} kg` : "—"}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    规格：<span className="font-medium text-primary">{productSpec || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-muted">
+                                    尺寸：<span className="font-medium text-primary">{packSize}</span>
+                                  </div>
+                                  <div className="text-muted">
+                                    重量：
+                                    <span className="font-medium text-primary">{packWeight ? `${packWeight} kg` : "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-lg font-semibold text-primary">{costTotal ? `¥${costTotal}` : "—"}</div>
+                                  <div className="text-xs text-muted">
+                                    {costPurchase ? `采购：¥${costPurchase}` : "采购：—"}
+                                  </div>
+                                  <div className="text-xs text-muted">{costHead ? `头程：¥${costHead}` : "头程：—"}</div>
+                                  <div className="text-xs text-muted">{costTail ? `尾程：¥${costTail}` : "尾程：—"}</div>
+                                  <div className="text-xs text-muted">
+                                    {costNegative ? `负向：¥${costNegative}` : "负向：—"}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="text-lg font-semibold text-primary">{temuQuote ? `¥${temuQuote}` : "—"}</div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="text-lg font-semibold text-primary">{priceRange || "—"}</div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">
+                                    公司编码：<span className="font-semibold text-primary">{companyCode || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    仓库编码：<span className="font-semibold text-primary">{warehouseCode || "—"}</span>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    平台编码：<span className="font-semibold text-primary">{platformCode || "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-2">
+                                  <div className="rounded-md bg-surface-2 px-3 py-2">
+                                    <div className="text-xs text-muted">计划采购量：</div>
+                                    <div className="mt-1 text-sm font-semibold text-primary">{planQty || "—"}</div>
+                                  </div>
+                                  <div className="text-xs text-muted">
+                                    {[usWarehouse ? `美西仓：${usWarehouse}` : "", usEastWarehouse ? `美东仓：${usEastWarehouse}` : "", szWarehouse ? `深圳仓：${szWarehouse}` : ""]
+                                      .filter(Boolean)
+                                      .join("，") || "—"}
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-lg font-semibold text-primary">{forecast || "—"}</div>
+                                  <div className="text-xs text-muted">{forecastSource || "—"}</div>
+                                </div>
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm font-semibold text-foreground">
+                                {actualOrder || "—"}
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm font-semibold text-foreground">
+                                {orderTotal || "—"}
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm text-foreground">
+                                {deliveryCycle || "—"}
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm text-foreground">
+                                {shipDate || "—"}
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm font-semibold text-emerald-600">
+                                {shipQty || "—"}
+                              </td>
+                              <td className="border-b border-border px-4 py-3 align-top text-sm">
+                                <div className="flex items-center gap-2">
+                                  <span className={`h-2 w-2 rounded-full ${statusDotClassName}`} />
+                                  <span className="font-medium text-foreground">{status || "—"}</span>
+                                </div>
+                              </td>
+                              <td className="sticky right-0 whitespace-nowrap border-b border-border bg-surface px-4 py-3 text-right align-top">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                                    onClick={() => openEdit(row)}
+                                  >
+                                    修改
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                    disabled={busy}
+                                    onClick={() => openConfirmWithdraw(row)}
+                                    aria-label="撤回"
+                                    title="撤回"
+                                  >
+                                    <RotateCcw className="h-4 w-4" />
+                                    撤回
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
               <div className="overflow-auto">
                 <table className="min-w-max border-separate border-spacing-0">
                   <thead>
@@ -2017,6 +5398,23 @@ export function WorkspaceClient({
                             onChange={(e) => {
                               const checked = e.target.checked;
                               setInquirySelectedIds(() => {
+                                if (!checked) return new Set();
+                                const next = new Set<number>();
+                                for (const r of records) next.add(r.id);
+                                return next;
+                              });
+                            }}
+                            aria-label="全选"
+                          />
+                        </th>
+                      ) : workspaceKey === "ops.pricing" ? (
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
+                          <input
+                            type="checkbox"
+                            checked={records.length > 0 && records.every((r) => pricingSelectedIds.has(r.id))}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setPricingSelectedIds(() => {
                                 if (!checked) return new Set();
                                 const next = new Set<number>();
                                 for (const r of records) next.add(r.id);
@@ -2041,7 +5439,7 @@ export function WorkspaceClient({
                         <td
                           className="px-3 py-6 text-sm text-muted"
                           colSpan={
-                            tableFields.length + 1 + (workspaceKey === "ops.inquiry" ? 1 : 0)
+                            tableFields.length + 1 + (workspaceKey === "ops.inquiry" || workspaceKey === "ops.pricing" ? 1 : 0)
                           }
                         >
                           暂无数据
@@ -2050,6 +5448,9 @@ export function WorkspaceClient({
                     ) : (
                       records.map((row) => {
                         const obj = toRecordStringUnknown(row.data);
+                        const status = String(obj["状态"] ?? "").trim();
+                        const operator = String(obj["运营人员"] ?? "").trim();
+                        const pricingBusy = pricingRowAction ? pricingRowAction.startsWith(`${row.id}:`) : false;
                         return (
                           <tr key={row.id} className="border-b border-border">
                             {workspaceKey === "ops.inquiry" ? (
@@ -2060,6 +5461,23 @@ export function WorkspaceClient({
                                   onChange={(e) => {
                                     const checked = e.target.checked;
                                     setInquirySelectedIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(row.id);
+                                      else next.delete(row.id);
+                                      return next;
+                                    });
+                                  }}
+                                  aria-label={`选择 ID ${row.id}`}
+                                />
+                              </td>
+                            ) : workspaceKey === "ops.pricing" ? (
+                              <td className="border-b border-border px-3 py-2">
+                                <input
+                                  type="checkbox"
+                                  checked={pricingSelectedIds.has(row.id)}
+                                  onChange={(e) => {
+                                    const checked = e.target.checked;
+                                    setPricingSelectedIds((prev) => {
                                       const next = new Set(prev);
                                       if (checked) next.add(row.id);
                                       else next.delete(row.id);
@@ -2135,6 +5553,49 @@ export function WorkspaceClient({
                             })}
                             <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right">
                               <div className="flex justify-end gap-2">
+                                {workspaceKey === "ops.pricing" && (status === "待分配运营者" || !operator) ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2 disabled:opacity-50"
+                                    onClick={() => openPricingAssign(row)}
+                                    disabled={pricingBulkAssignSaving || pricingAssigneeLoading}
+                                  >
+                                    分配运营者
+                                  </button>
+                                ) : null}
+                                {workspaceKey === "ops.pricing" && status === "待核价" ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-emerald-300 bg-surface px-3 text-xs text-emerald-600 hover:bg-emerald-50 disabled:opacity-50"
+                                    onClick={() => updatePricingRowStatus(row.id, "待确品")}
+                                    disabled={pricingBusy}
+                                  >
+                                    <Check className="h-3.5 w-3.5" />
+                                    通过
+                                  </button>
+                                ) : null}
+                                {workspaceKey === "ops.pricing" && status !== "已放弃" && status !== "【核价】已放弃" ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-red-300 bg-surface px-3 text-xs text-red-500 hover:bg-red-50 disabled:opacity-50"
+                                    onClick={() => openPricingAbandon(row)}
+                                    disabled={pricingBusy}
+                                  >
+                                    <X className="h-3.5 w-3.5" />
+                                    放弃
+                                  </button>
+                                ) : null}
+                                {workspaceKey === "ops.pricing" ? (
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-surface px-3 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
+                                    onClick={() => openPricingWithdraw(row)}
+                                    disabled={pricingBusy}
+                                  >
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                    撤回
+                                  </button>
+                                ) : null}
                                 <button
                                   type="button"
                                   className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
@@ -2142,13 +5603,21 @@ export function WorkspaceClient({
                                 >
                                   修改
                                 </button>
-                                {canSeeInquiryAssign(row) ? (
+                                {workspaceKey === "ops.inquiry" ? (
                                   <button
                                     type="button"
-                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
-                                    onClick={() => openInquiryAssign(row)}
+                                    className={[
+                                      "inline-flex h-8 items-center justify-center gap-1 rounded-lg border bg-surface px-3 text-xs disabled:opacity-50",
+                                      status === "待询价"
+                                        ? "border-red-300 text-red-500 hover:bg-red-50"
+                                        : "border-border text-muted",
+                                    ].join(" ")}
+                                    onClick={() => openInquiryWithdraw(row)}
+                                    disabled={status !== "待询价"}
+                                    title={status === "待询价" ? "撤回" : "仅状态为“待询价”可撤回"}
                                   >
-                                    分配
+                                    <RotateCcw className="h-3.5 w-3.5" />
+                                    撤回
                                   </button>
                                 ) : null}
                               </div>
@@ -2160,7 +5629,7 @@ export function WorkspaceClient({
                   </tbody>
                 </table>
               </div>
-            ) : (
+            )) : (
               <div>
                 <div className="grid grid-cols-5 bg-surface-2 px-3 py-2 text-xs text-muted">
                   <div>ID</div>
@@ -2186,15 +5655,25 @@ export function WorkspaceClient({
                           >
                             ✎
                           </button>
-                          {canSeeInquiryAssign(row) ? (
+                          {workspaceKey === "ops.inquiry" ? (
+                            (() => {
+                              const obj = toRecordStringUnknown(row.data);
+                              const canWithdraw = String(obj["状态"] ?? "").trim() === "待询价";
+                              return (
                             <button
                               type="button"
-                              className="ml-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                              title="分配"
-                              onClick={() => openInquiryAssign(row)}
+                              className={[
+                                "ml-2 inline-flex h-8 w-8 items-center justify-center rounded-lg border bg-surface disabled:opacity-50",
+                                canWithdraw ? "border-red-300 text-red-500 hover:bg-red-50" : "border-border text-muted",
+                              ].join(" ")}
+                              title={canWithdraw ? "撤回" : "仅状态为“待询价”可撤回"}
+                              onClick={() => openInquiryWithdraw(row)}
+                              disabled={!canWithdraw}
                             >
-                              分
+                              <RotateCcw className="h-4 w-4" />
                             </button>
+                              );
+                            })()
                           ) : null}
                         </div>
                       </div>
@@ -2440,6 +5919,11 @@ export function WorkspaceClient({
                               : (cmToInchesValue(inquiryForm.packageLengthCm) ?? "")
                           }
                           onChange={(e) => {
+                            pendingInquiryModalFocus.current = {
+                              key: "inquiry-create-package-length",
+                              selectionStart: e.currentTarget.selectionStart,
+                              selectionEnd: e.currentTarget.selectionEnd,
+                            };
                             const next = e.target.value;
                             setInquiryForm((prev) => {
                               if (inquiryUnits === "cmkg") return { ...prev, packageLengthCm: next };
@@ -2449,6 +5933,9 @@ export function WorkspaceClient({
                               if (cm == null) return prev;
                               return { ...prev, packageLengthCm: cm };
                             });
+                          }}
+                          ref={(el) => {
+                            inquiryModalFieldRefs.current["inquiry-create-package-length"] = el;
                           }}
                           placeholder="长"
                           className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -2461,6 +5948,11 @@ export function WorkspaceClient({
                               : (cmToInchesValue(inquiryForm.packageWidthCm) ?? "")
                           }
                           onChange={(e) => {
+                            pendingInquiryModalFocus.current = {
+                              key: "inquiry-create-package-width",
+                              selectionStart: e.currentTarget.selectionStart,
+                              selectionEnd: e.currentTarget.selectionEnd,
+                            };
                             const next = e.target.value;
                             setInquiryForm((prev) => {
                               if (inquiryUnits === "cmkg") return { ...prev, packageWidthCm: next };
@@ -2470,6 +5962,9 @@ export function WorkspaceClient({
                               if (cm == null) return prev;
                               return { ...prev, packageWidthCm: cm };
                             });
+                          }}
+                          ref={(el) => {
+                            inquiryModalFieldRefs.current["inquiry-create-package-width"] = el;
                           }}
                           placeholder="宽"
                           className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -2482,6 +5977,11 @@ export function WorkspaceClient({
                               : (cmToInchesValue(inquiryForm.packageHeightCm) ?? "")
                           }
                           onChange={(e) => {
+                            pendingInquiryModalFocus.current = {
+                              key: "inquiry-create-package-height",
+                              selectionStart: e.currentTarget.selectionStart,
+                              selectionEnd: e.currentTarget.selectionEnd,
+                            };
                             const next = e.target.value;
                             setInquiryForm((prev) => {
                               if (inquiryUnits === "cmkg") return { ...prev, packageHeightCm: next };
@@ -2491,6 +5991,9 @@ export function WorkspaceClient({
                               if (cm == null) return prev;
                               return { ...prev, packageHeightCm: cm };
                             });
+                          }}
+                          ref={(el) => {
+                            inquiryModalFieldRefs.current["inquiry-create-package-height"] = el;
                           }}
                           placeholder="高"
                           className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -2508,6 +6011,11 @@ export function WorkspaceClient({
                             : (kgToLbValue(inquiryForm.packageWeightKg) ?? "")
                         }
                         onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-create-package-weight",
+                            selectionStart: e.currentTarget.selectionStart,
+                            selectionEnd: e.currentTarget.selectionEnd,
+                          };
                           const next = e.target.value;
                           setInquiryForm((prev) => {
                             if (inquiryUnits === "cmkg") return { ...prev, packageWeightKg: next };
@@ -2517,6 +6025,9 @@ export function WorkspaceClient({
                             if (kg == null) return prev;
                             return { ...prev, packageWeightKg: kg };
                           });
+                        }}
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-create-package-weight"] = el;
                         }}
                         placeholder="请输入重量"
                         className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -2533,7 +6044,17 @@ export function WorkspaceClient({
                       <input
                         inputMode="decimal"
                         value={inquiryForm.productUnitPrice}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, productUnitPrice: e.target.value }))}
+                      onChange={(e) => {
+                        pendingInquiryModalFocus.current = {
+                          key: "inquiry-create-unit-price",
+                          selectionStart: e.currentTarget.selectionStart,
+                          selectionEnd: e.currentTarget.selectionEnd,
+                        };
+                        setInquiryForm((prev) => ({ ...prev, productUnitPrice: e.target.value }));
+                      }}
+                      ref={(el) => {
+                        inquiryModalFieldRefs.current["inquiry-create-unit-price"] = el;
+                      }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -2542,7 +6063,17 @@ export function WorkspaceClient({
                       <input
                         inputMode="numeric"
                         value={inquiryForm.moq}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, moq: e.target.value }))}
+                      onChange={(e) => {
+                        pendingInquiryModalFocus.current = {
+                          key: "inquiry-create-moq",
+                          selectionStart: e.currentTarget.selectionStart,
+                          selectionEnd: e.currentTarget.selectionEnd,
+                        };
+                        setInquiryForm((prev) => ({ ...prev, moq: e.target.value }));
+                      }}
+                      ref={(el) => {
+                        inquiryModalFieldRefs.current["inquiry-create-moq"] = el;
+                      }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -2551,12 +6082,20 @@ export function WorkspaceClient({
                       <select
                         value={inquiryForm.discountPolicy}
                         onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-create-discount-policy",
+                            selectionStart: null,
+                            selectionEnd: null,
+                          };
                           const next = (e.target.value as "" | "有" | "无") || "";
                           setInquiryForm((prev) => ({
                             ...prev,
                             discountPolicy: next,
                             discountNote: next === "有" ? prev.discountNote : "",
                           }));
+                        }}
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-create-discount-policy"] = el;
                         }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       >
@@ -2570,7 +6109,17 @@ export function WorkspaceClient({
                         <div className="text-xs text-muted">优惠备注</div>
                         <textarea
                           value={inquiryForm.discountNote}
-                          onChange={(e) => setInquiryForm((prev) => ({ ...prev, discountNote: e.target.value }))}
+                          onChange={(e) => {
+                            pendingInquiryModalFocus.current = {
+                              key: "inquiry-create-discount-note",
+                              selectionStart: e.currentTarget.selectionStart,
+                              selectionEnd: e.currentTarget.selectionEnd,
+                            };
+                            setInquiryForm((prev) => ({ ...prev, discountNote: e.target.value }));
+                          }}
+                          ref={(el) => {
+                            inquiryModalFieldRefs.current["inquiry-create-discount-note"] = el;
+                          }}
                           rows={3}
                           className="w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
                         />
@@ -2586,7 +6135,17 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">主要工艺</div>
                       <select
                         value={inquiryForm.mainProcess}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, mainProcess: e.target.value }))}
+                        onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-create-main-process",
+                            selectionStart: null,
+                            selectionEnd: null,
+                          };
+                          setInquiryForm((prev) => ({ ...prev, mainProcess: e.target.value }));
+                        }}
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-create-main-process"] = el;
+                        }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       >
                         <option value="">请选择</option>
@@ -2601,7 +6160,17 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">工厂所在地</div>
                       <input
                         value={inquiryForm.factoryLocation}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, factoryLocation: e.target.value }))}
+                      onChange={(e) => {
+                        pendingInquiryModalFocus.current = {
+                          key: "inquiry-create-factory-location",
+                          selectionStart: e.currentTarget.selectionStart,
+                          selectionEnd: e.currentTarget.selectionEnd,
+                        };
+                        setInquiryForm((prev) => ({ ...prev, factoryLocation: e.target.value }));
+                      }}
+                      ref={(el) => {
+                        inquiryModalFieldRefs.current["inquiry-create-factory-location"] = el;
+                      }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -2609,7 +6178,17 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">联系人</div>
                       <input
                         value={inquiryForm.factoryContact}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, factoryContact: e.target.value }))}
+                      onChange={(e) => {
+                        pendingInquiryModalFocus.current = {
+                          key: "inquiry-create-factory-contact",
+                          selectionStart: e.currentTarget.selectionStart,
+                          selectionEnd: e.currentTarget.selectionEnd,
+                        };
+                        setInquiryForm((prev) => ({ ...prev, factoryContact: e.target.value }));
+                      }}
+                      ref={(el) => {
+                        inquiryModalFieldRefs.current["inquiry-create-factory-contact"] = el;
+                      }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -2617,7 +6196,17 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">联系人电话</div>
                       <input
                         value={inquiryForm.factoryPhone}
-                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, factoryPhone: e.target.value }))}
+                      onChange={(e) => {
+                        pendingInquiryModalFocus.current = {
+                          key: "inquiry-create-factory-phone",
+                          selectionStart: e.currentTarget.selectionStart,
+                          selectionEnd: e.currentTarget.selectionEnd,
+                        };
+                        setInquiryForm((prev) => ({ ...prev, factoryPhone: e.target.value }));
+                      }}
+                      ref={(el) => {
+                        inquiryModalFieldRefs.current["inquiry-create-factory-phone"] = el;
+                      }}
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -2642,7 +6231,7 @@ export function WorkspaceClient({
               <button
                 type="button"
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
-                onClick={() => saveInquiryPurchase("待确品", "save")}
+                onClick={() => saveInquiryPurchase("待询价", "save")}
                 disabled={inquiryActionLoading != null}
               >
                 {inquiryActionLoading === "save" ? "保存中…" : "保存"}
@@ -2650,7 +6239,7 @@ export function WorkspaceClient({
               <button
                 type="button"
                 className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
-                onClick={() => saveInquiryPurchase("已确品", "submit")}
+                onClick={() => saveInquiryPurchase("待分配运营者", "submit")}
                 disabled={inquiryActionLoading != null}
               >
                 {inquiryActionLoading === "submit" ? "提交中…" : "提交"}
@@ -2917,6 +6506,540 @@ export function WorkspaceClient({
         </EditModalShell>
       ) : null}
 
+      {inquiryWithdrawOpen ? (
+        <EditModalShell
+          title={inquiryWithdrawRecordId != null ? `撤回询价（ID: ${inquiryWithdrawRecordId}）` : "撤回询价"}
+          dataEditModal="inquiry-withdraw"
+          onClose={() => {
+            setInquiryWithdrawOpen(false);
+            setInquiryWithdrawRecordId(null);
+            setInquiryWithdrawPreview(null);
+            setInquiryWithdrawReason("");
+          }}
+        >
+          <div className="mt-1 text-sm text-muted">请确认商品信息并填写撤回理由</div>
+
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">基本信息</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={inquiryWithdrawPreview?.productName ?? "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <input
+                      value={inquiryWithdrawPreview?.category ?? "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">产品属性</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">尺寸（长x宽x高）</div>
+                    <input
+                      value={inquiryWithdrawPreview?.productSize ?? "—x—x—cm"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">重量</div>
+                    <input
+                      value={inquiryWithdrawPreview?.productWeight ?? "—kg"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center gap-2">
+                  <div className="text-lg font-semibold">撤回理由</div>
+                  <span className="text-sm font-medium text-red-500">*</span>
+                </div>
+                <div className="mt-4">
+                  <textarea
+                    value={inquiryWithdrawReason}
+                    onChange={(e) => setInquiryWithdrawReason(e.target.value)}
+                    className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
+                    placeholder="请输入撤回理由，例如：供应商报价过高、产品规格不符等..."
+                    disabled={inquiryWithdrawSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setInquiryWithdrawOpen(false);
+                setInquiryWithdrawRecordId(null);
+                setInquiryWithdrawPreview(null);
+                setInquiryWithdrawReason("");
+              }}
+              disabled={inquiryWithdrawSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-surface px-4 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+              onClick={saveInquiryWithdraw}
+              disabled={inquiryWithdrawSaving || !inquiryWithdrawReason.trim()}
+            >
+              {inquiryWithdrawSaving ? "提交中…" : "确定撤回"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
+      {pricingAbandonOpen ? (
+        <EditModalShell
+          title={pricingAbandonRecordId != null ? `放弃核价（ID: ${pricingAbandonRecordId}）` : "放弃核价"}
+          dataEditModal="pricing-abandon"
+          onClose={() => {
+            setPricingAbandonOpen(false);
+            setPricingAbandonRecordId(null);
+            setPricingAbandonProductName("");
+            setPricingAbandonReason("");
+          }}
+        >
+          <div className="mt-1 text-sm text-muted">请确认商品信息并填写放弃理由</div>
+
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">商品信息</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={pricingAbandonProductName || "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center gap-2">
+                  <div className="text-lg font-semibold">放弃理由</div>
+                  <span className="text-sm font-medium text-red-500">*</span>
+                </div>
+                <div className="mt-4">
+                  <textarea
+                    value={pricingAbandonReason}
+                    onChange={(e) => setPricingAbandonReason(e.target.value)}
+                    className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
+                    placeholder="请输入放弃理由，例如：成本过高、供应链无法满足等..."
+                    disabled={pricingAbandonSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setPricingAbandonOpen(false);
+                setPricingAbandonRecordId(null);
+                setPricingAbandonProductName("");
+                setPricingAbandonReason("");
+              }}
+              disabled={pricingAbandonSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-surface px-4 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+              onClick={savePricingAbandon}
+              disabled={pricingAbandonSaving || !pricingAbandonReason.trim()}
+            >
+              {pricingAbandonSaving ? "提交中…" : "确定放弃"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
+      {pricingWithdrawOpen ? (
+        <EditModalShell
+          title={pricingWithdrawRecordId != null ? `撤回核价（ID: ${pricingWithdrawRecordId}）` : "撤回核价"}
+          dataEditModal="pricing-withdraw"
+          onClose={() => {
+            setPricingWithdrawOpen(false);
+            setPricingWithdrawRecordId(null);
+            setPricingWithdrawProductName("");
+            setPricingWithdrawReason("");
+          }}
+        >
+          <div className="mt-1 text-sm text-muted">请确认商品信息并填写撤回理由</div>
+
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">商品信息</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={pricingWithdrawProductName || "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center gap-2">
+                  <div className="text-lg font-semibold">撤回理由</div>
+                  <span className="text-sm font-medium text-red-500">*</span>
+                </div>
+                <div className="mt-4">
+                  <textarea
+                    value={pricingWithdrawReason}
+                    onChange={(e) => setPricingWithdrawReason(e.target.value)}
+                    className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
+                    placeholder="请输入撤回理由，例如：资料不完整、需重新询价等..."
+                    disabled={pricingWithdrawSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setPricingWithdrawOpen(false);
+                setPricingWithdrawRecordId(null);
+                setPricingWithdrawProductName("");
+                setPricingWithdrawReason("");
+              }}
+              disabled={pricingWithdrawSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-surface px-4 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+              onClick={savePricingWithdraw}
+              disabled={pricingWithdrawSaving || !pricingWithdrawReason.trim()}
+            >
+              {pricingWithdrawSaving ? "提交中…" : "确认撤回"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
+      {confirmWithdrawOpen ? (
+        <EditModalShell
+          title={confirmWithdrawRecordId != null ? `撤回确品（ID: ${confirmWithdrawRecordId}）` : "撤回确品"}
+          dataEditModal="confirm-withdraw"
+          onClose={() => {
+            setConfirmWithdrawOpen(false);
+            setConfirmWithdrawRecordId(null);
+            setConfirmWithdrawProductName("");
+            setConfirmWithdrawReason("");
+          }}
+        >
+          <div className="mt-1 text-sm text-muted">请确认商品信息并填写撤回理由</div>
+
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">商品信息</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={confirmWithdrawProductName || "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center gap-2">
+                  <div className="text-lg font-semibold">撤回理由</div>
+                  <span className="text-sm font-medium text-red-500">*</span>
+                </div>
+                <div className="mt-4">
+                  <textarea
+                    value={confirmWithdrawReason}
+                    onChange={(e) => setConfirmWithdrawReason(e.target.value)}
+                    className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
+                    placeholder="请输入撤回理由，例如：资料不完整、需重新核价等..."
+                    disabled={confirmWithdrawSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setConfirmWithdrawOpen(false);
+                setConfirmWithdrawRecordId(null);
+                setConfirmWithdrawProductName("");
+                setConfirmWithdrawReason("");
+              }}
+              disabled={confirmWithdrawSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-surface px-4 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+              onClick={saveConfirmWithdraw}
+              disabled={confirmWithdrawSaving || !confirmWithdrawReason.trim()}
+            >
+              {confirmWithdrawSaving ? "提交中…" : "确认撤回"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
+      {purchaseWithdrawOpen ? (
+        <EditModalShell
+          title={purchaseWithdrawRecordId != null ? `撤回采购（ID: ${purchaseWithdrawRecordId}）` : "撤回采购"}
+          dataEditModal="purchase-withdraw"
+          onClose={() => {
+            setPurchaseWithdrawOpen(false);
+            setPurchaseWithdrawRecordId(null);
+            setPurchaseWithdrawProductName("");
+            setPurchaseWithdrawReason("");
+          }}
+        >
+          <div className="mt-1 text-sm text-muted">请确认商品信息并填写撤回理由</div>
+
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">商品信息</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={purchaseWithdrawProductName || "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center gap-2">
+                  <div className="text-lg font-semibold">撤回理由</div>
+                  <span className="text-sm font-medium text-red-500">*</span>
+                </div>
+                <div className="mt-4">
+                  <textarea
+                    value={purchaseWithdrawReason}
+                    onChange={(e) => setPurchaseWithdrawReason(e.target.value)}
+                    className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
+                    placeholder="请输入撤回理由，例如：需重新确品、信息有误等..."
+                    disabled={purchaseWithdrawSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setPurchaseWithdrawOpen(false);
+                setPurchaseWithdrawRecordId(null);
+                setPurchaseWithdrawProductName("");
+                setPurchaseWithdrawReason("");
+              }}
+              disabled={purchaseWithdrawSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-surface px-4 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+              onClick={savePurchaseWithdraw}
+              disabled={purchaseWithdrawSaving || !purchaseWithdrawReason.trim()}
+            >
+              {purchaseWithdrawSaving ? "提交中…" : "确认撤回"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
+      {selectionAbandonOpen ? (
+        <EditModalShell
+          title={selectionAbandonRecordId != null ? `放弃选品（ID: ${selectionAbandonRecordId}）` : "放弃选品"}
+          dataEditModal="selection-abandon"
+          onClose={() => {
+            setSelectionAbandonOpen(false);
+            setSelectionAbandonRecordId(null);
+            setSelectionAbandonPreview(null);
+            setSelectionAbandonReason("");
+          }}
+        >
+          <div className="mt-1 text-sm text-muted">请确认商品信息并填写放弃理由</div>
+
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-4">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">基本信息</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">商品名称</div>
+                    <input
+                      value={selectionAbandonPreview?.productName ?? "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">所属类目</div>
+                    <input
+                      value={selectionAbandonPreview?.category ?? "—"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center justify-between">
+                  <div className="text-lg font-semibold">产品属性</div>
+                  <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>
+                </div>
+                <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">尺寸（长x宽x高）</div>
+                    <input
+                      value={selectionAbandonPreview?.productSize ?? "—x—x—cm"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <div className="text-xs text-muted">重量</div>
+                    <input
+                      value={selectionAbandonPreview?.productWeight ?? "—kg"}
+                      readOnly
+                      disabled
+                      className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-surface p-5">
+                <div className="flex items-center gap-2">
+                  <div className="text-lg font-semibold">放弃理由</div>
+                  <span className="text-sm font-medium text-red-500">*</span>
+                </div>
+                <div className="mt-4">
+                  <textarea
+                    value={selectionAbandonReason}
+                    onChange={(e) => setSelectionAbandonReason(e.target.value)}
+                    className="min-h-[120px] w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none"
+                    placeholder="请输入放弃理由，例如：供应商报价过高、产品规格不符等..."
+                    disabled={selectionAbandonSaving}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setSelectionAbandonOpen(false);
+                setSelectionAbandonRecordId(null);
+                setSelectionAbandonPreview(null);
+                setSelectionAbandonReason("");
+              }}
+              disabled={selectionAbandonSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-red-300 bg-surface px-4 text-sm font-medium text-red-500 hover:bg-red-50 disabled:opacity-50"
+              onClick={saveSelectionAbandon}
+              disabled={selectionAbandonSaving || !selectionAbandonReason.trim()}
+            >
+              {selectionAbandonSaving ? "提交中…" : "确定放弃"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
       {inquiryBulkAssignOpen ? (
         <EditModalShell
           title={`批量分配询价人（${inquirySelectedIds.size}条）`}
@@ -2999,12 +7122,98 @@ export function WorkspaceClient({
         </EditModalShell>
       ) : null}
 
+      {pricingBulkAssignOpen ? (
+        <EditModalShell
+          title={`批量分配运营者（${pricingSelectedIds.size}条）`}
+          dataEditModal="pricing-bulk-assign"
+          onClose={() => {
+            setPricingBulkAssignOpen(false);
+            setPricingBulkAssignPerson("");
+          }}
+        >
+          <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-3">
+            <div className="flex flex-col gap-3">
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">已选择记录</div>
+                <div className="mt-3 max-h-56 overflow-auto rounded-lg border border-border bg-surface px-3 py-2 text-sm text-muted">
+                  {(() => {
+                    const selected = records.filter((r) => pricingSelectedIds.has(r.id));
+                    if (selected.length === 0) return <div className="py-1">暂无选择</div>;
+                    return (
+                      <ul className="list-disc pl-5">
+                        {selected.map((r) => {
+                          const obj = toRecordStringUnknown(r.data);
+                          const name = String(obj["名称"] ?? "").trim();
+                          const cat = String(obj["所属类目"] ?? "").trim();
+                          const operator = String(obj["运营人员"] ?? "").trim();
+                          return (
+                            <li key={r.id} className="py-1">
+                              <span>ID：{r.id}</span>
+                              {name ? <span>，名称：{name}</span> : null}
+                              {cat ? <span>，所属类目：{cat}</span> : null}
+                              {operator ? <span>，当前运营者：{operator}</span> : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-surface p-3">
+                <div className="flex flex-col gap-1">
+                  <div className="text-xs text-muted">选择运营者</div>
+                  <select
+                    value={pricingBulkAssignPerson}
+                    onChange={(e) => setPricingBulkAssignPerson(e.target.value)}
+                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                    disabled={pricingAssigneeLoading}
+                  >
+                    <option value="">请选择</option>
+                    {pricingAssigneeOptions.map((u) => (
+                      <option key={u.username} value={u.username}>
+                        {u.displayName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-3 flex items-center justify-end gap-3">
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={() => {
+                setPricingBulkAssignOpen(false);
+                setPricingBulkAssignPerson("");
+              }}
+              disabled={pricingBulkAssignSaving}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
+              onClick={savePricingBulkAssign}
+              disabled={pricingBulkAssignSaving || pricingAssigneeLoading || !pricingBulkAssignPerson.trim()}
+            >
+              {pricingBulkAssignSaving ? "提交中…" : "确认分配"}
+            </button>
+          </div>
+        </EditModalShell>
+      ) : null}
+
       {inquiryBulkEditOpen ? (
         <EditModalShell
           title={`批量修改数据（${(inquiryBulkEditIds.length || inquirySelectedIds.size).toString()}条）`}
           dataEditModal="inquiry-bulk-edit"
           onClose={() => {
             setInquiryBulkEditOpen(false);
+            setInquiryBulkEditAction(null);
+            setInquiryBulkEditPreview(null);
             setInquiryBulkEditIds([]);
             setInquiryBulkEditSpecs([]);
             setInquiryBulkEditForm({
@@ -3058,7 +7267,7 @@ export function WorkspaceClient({
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">商品名称</div>
                     <input
-                      value="—"
+                      value={inquiryBulkEditPreview?.productName || "—"}
                       readOnly
                       className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
                     />
@@ -3066,7 +7275,7 @@ export function WorkspaceClient({
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">所属类目</div>
                     <input
-                      value="—"
+                      value={inquiryBulkEditPreview?.category || "—"}
                       readOnly
                       className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
                     />
@@ -3136,6 +7345,11 @@ export function WorkspaceClient({
                             : (cmToInchesValue(inquiryBulkEditForm.packageLengthCm) ?? "")
                         }
                         onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-bulk-package-length",
+                            selectionStart: e.currentTarget.selectionStart,
+                            selectionEnd: e.currentTarget.selectionEnd,
+                          };
                           const next = e.target.value;
                           setInquiryBulkEditForm((prev) => {
                             if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageLengthCm: next };
@@ -3146,7 +7360,17 @@ export function WorkspaceClient({
                             return { ...prev, packageLengthCm: cm };
                           });
                         }}
-                        placeholder="留空不修改"
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-bulk-package-length"] = el;
+                        }}
+                        placeholder={(() => {
+                          const v = inquiryBulkEditPreview?.packageLengthCm ?? "";
+                          if (!v) return "留空不修改";
+                          if (v.startsWith("（")) return `当前：${v}`;
+                          if (inquiryBulkEditUnits === "cmkg") return `当前：${v}`;
+                          const inch = cmToInchesValue(v);
+                          return `当前：${inch ?? v}`;
+                        })()}
                         className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                       <input
@@ -3157,6 +7381,11 @@ export function WorkspaceClient({
                             : (cmToInchesValue(inquiryBulkEditForm.packageWidthCm) ?? "")
                         }
                         onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-bulk-package-width",
+                            selectionStart: e.currentTarget.selectionStart,
+                            selectionEnd: e.currentTarget.selectionEnd,
+                          };
                           const next = e.target.value;
                           setInquiryBulkEditForm((prev) => {
                             if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageWidthCm: next };
@@ -3167,7 +7396,17 @@ export function WorkspaceClient({
                             return { ...prev, packageWidthCm: cm };
                           });
                         }}
-                        placeholder="留空不修改"
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-bulk-package-width"] = el;
+                        }}
+                        placeholder={(() => {
+                          const v = inquiryBulkEditPreview?.packageWidthCm ?? "";
+                          if (!v) return "留空不修改";
+                          if (v.startsWith("（")) return `当前：${v}`;
+                          if (inquiryBulkEditUnits === "cmkg") return `当前：${v}`;
+                          const inch = cmToInchesValue(v);
+                          return `当前：${inch ?? v}`;
+                        })()}
                         className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                       <input
@@ -3178,6 +7417,11 @@ export function WorkspaceClient({
                             : (cmToInchesValue(inquiryBulkEditForm.packageHeightCm) ?? "")
                         }
                         onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-bulk-package-height",
+                            selectionStart: e.currentTarget.selectionStart,
+                            selectionEnd: e.currentTarget.selectionEnd,
+                          };
                           const next = e.target.value;
                           setInquiryBulkEditForm((prev) => {
                             if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageHeightCm: next };
@@ -3188,7 +7432,17 @@ export function WorkspaceClient({
                             return { ...prev, packageHeightCm: cm };
                           });
                         }}
-                        placeholder="留空不修改"
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-bulk-package-height"] = el;
+                        }}
+                        placeholder={(() => {
+                          const v = inquiryBulkEditPreview?.packageHeightCm ?? "";
+                          if (!v) return "留空不修改";
+                          if (v.startsWith("（")) return `当前：${v}`;
+                          if (inquiryBulkEditUnits === "cmkg") return `当前：${v}`;
+                          const inch = cmToInchesValue(v);
+                          return `当前：${inch ?? v}`;
+                        })()}
                         className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -3204,6 +7458,11 @@ export function WorkspaceClient({
                           : (kgToLbValue(inquiryBulkEditForm.packageWeightKg) ?? "")
                       }
                       onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-package-weight",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
                         const next = e.target.value;
                         setInquiryBulkEditForm((prev) => {
                           if (inquiryBulkEditUnits === "cmkg") return { ...prev, packageWeightKg: next };
@@ -3214,7 +7473,17 @@ export function WorkspaceClient({
                           return { ...prev, packageWeightKg: kg };
                         });
                       }}
-                      placeholder="留空不修改"
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-package-weight"] = el;
+                    }}
+                      placeholder={(() => {
+                        const v = inquiryBulkEditPreview?.packageWeightKg ?? "";
+                        if (!v) return "留空不修改";
+                        if (v.startsWith("（")) return `当前：${v}`;
+                        if (inquiryBulkEditUnits === "cmkg") return `当前：${v}`;
+                        const lb = kgToLbValue(v);
+                        return `当前：${lb ?? v}`;
+                      })()}
                       className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                     />
                   </div>
@@ -3229,8 +7498,22 @@ export function WorkspaceClient({
                     <input
                       inputMode="decimal"
                       value={inquiryBulkEditForm.productUnitPrice}
-                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, productUnitPrice: e.target.value }))}
-                      placeholder="留空不修改"
+                    onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-unit-price",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
+                      setInquiryBulkEditForm((prev) => ({ ...prev, productUnitPrice: e.target.value }));
+                    }}
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-unit-price"] = el;
+                    }}
+                      placeholder={(() => {
+                        const v = inquiryBulkEditPreview?.productUnitPrice ?? "";
+                        if (!v) return "留空不修改";
+                        return v.startsWith("（") ? `当前：${v}` : `当前：${v}`;
+                      })()}
                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                     />
                   </div>
@@ -3239,13 +7522,30 @@ export function WorkspaceClient({
                     <input
                       inputMode="numeric"
                       value={inquiryBulkEditForm.moq}
-                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, moq: e.target.value }))}
-                      placeholder="留空不修改"
+                    onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-moq",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
+                      setInquiryBulkEditForm((prev) => ({ ...prev, moq: e.target.value }));
+                    }}
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-moq"] = el;
+                    }}
+                      placeholder={(() => {
+                        const v = inquiryBulkEditPreview?.moq ?? "";
+                        if (!v) return "留空不修改";
+                        return v.startsWith("（") ? `当前：${v}` : `当前：${v}`;
+                      })()}
                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                     />
                   </div>
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">优惠政策</div>
+                    <div className="text-xs text-muted">
+                      当前：{inquiryBulkEditPreview?.discountPolicy ? inquiryBulkEditPreview.discountPolicy : "—"}
+                    </div>
                     <select
                       value={inquiryBulkEditForm.discountPolicy}
                       onChange={(e) => {
@@ -3267,10 +7567,25 @@ export function WorkspaceClient({
                     <div className="text-xs text-muted">优惠备注</div>
                     <textarea
                       value={inquiryBulkEditForm.discountNote}
-                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, discountNote: e.target.value }))}
+                    onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-discount-note",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
+                      setInquiryBulkEditForm((prev) => ({ ...prev, discountNote: e.target.value }));
+                    }}
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-discount-note"] = el;
+                    }}
                       rows={3}
                       disabled={inquiryBulkEditForm.discountPolicy !== "有"}
-                      placeholder={inquiryBulkEditForm.discountPolicy === "有" ? "留空不修改" : "仅在选择“有”时可填"}
+                      placeholder={(() => {
+                        if (inquiryBulkEditForm.discountPolicy !== "有") return "仅在选择“有”时可填";
+                        const v = inquiryBulkEditPreview?.discountNote ?? "";
+                        if (!v) return "留空不修改";
+                        return v.startsWith("（") ? `当前：${v}` : `当前：${v}`;
+                      })()}
                       className={[
                         "w-full resize-y rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none",
                         inquiryBulkEditForm.discountPolicy !== "有" ? "cursor-not-allowed opacity-70" : "",
@@ -3285,6 +7600,9 @@ export function WorkspaceClient({
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <div className="flex flex-col gap-1">
                     <div className="text-xs text-muted">主要工艺</div>
+                    <div className="text-xs text-muted">
+                      当前：{inquiryBulkEditPreview?.mainProcess ? inquiryBulkEditPreview.mainProcess : "—"}
+                    </div>
                     <select
                       value={inquiryBulkEditForm.mainProcess}
                       onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, mainProcess: e.target.value }))}
@@ -3302,8 +7620,22 @@ export function WorkspaceClient({
                     <div className="text-xs text-muted">工厂所在地</div>
                     <input
                       value={inquiryBulkEditForm.factoryLocation}
-                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, factoryLocation: e.target.value }))}
-                      placeholder="留空不修改"
+                    onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-factory-location",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
+                      setInquiryBulkEditForm((prev) => ({ ...prev, factoryLocation: e.target.value }));
+                    }}
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-factory-location"] = el;
+                    }}
+                      placeholder={(() => {
+                        const v = inquiryBulkEditPreview?.factoryLocation ?? "";
+                        if (!v) return "留空不修改";
+                        return v.startsWith("（") ? `当前：${v}` : `当前：${v}`;
+                      })()}
                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                     />
                   </div>
@@ -3311,8 +7643,22 @@ export function WorkspaceClient({
                     <div className="text-xs text-muted">联系人</div>
                     <input
                       value={inquiryBulkEditForm.factoryContact}
-                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, factoryContact: e.target.value }))}
-                      placeholder="留空不修改"
+                    onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-factory-contact",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
+                      setInquiryBulkEditForm((prev) => ({ ...prev, factoryContact: e.target.value }));
+                    }}
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-factory-contact"] = el;
+                    }}
+                      placeholder={(() => {
+                        const v = inquiryBulkEditPreview?.factoryContact ?? "";
+                        if (!v) return "留空不修改";
+                        return v.startsWith("（") ? `当前：${v}` : `当前：${v}`;
+                      })()}
                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                     />
                   </div>
@@ -3320,8 +7666,22 @@ export function WorkspaceClient({
                     <div className="text-xs text-muted">联系人电话</div>
                     <input
                       value={inquiryBulkEditForm.factoryPhone}
-                      onChange={(e) => setInquiryBulkEditForm((prev) => ({ ...prev, factoryPhone: e.target.value }))}
-                      placeholder="留空不修改"
+                    onChange={(e) => {
+                      pendingInquiryModalFocus.current = {
+                        key: "inquiry-bulk-factory-phone",
+                        selectionStart: e.currentTarget.selectionStart,
+                        selectionEnd: e.currentTarget.selectionEnd,
+                      };
+                      setInquiryBulkEditForm((prev) => ({ ...prev, factoryPhone: e.target.value }));
+                    }}
+                    ref={(el) => {
+                      inquiryModalFieldRefs.current["inquiry-bulk-factory-phone"] = el;
+                    }}
+                      placeholder={(() => {
+                        const v = inquiryBulkEditPreview?.factoryPhone ?? "";
+                        if (!v) return "留空不修改";
+                        return v.startsWith("（") ? `当前：${v}` : `当前：${v}`;
+                      })()}
                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                     />
                   </div>
@@ -3336,6 +7696,8 @@ export function WorkspaceClient({
               className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
               onClick={() => {
                 setInquiryBulkEditOpen(false);
+                setInquiryBulkEditAction(null);
+                setInquiryBulkEditPreview(null);
                 setInquiryBulkEditIds([]);
                 setInquiryBulkEditSpecs([]);
                 setInquiryBulkEditForm({
@@ -3360,10 +7722,18 @@ export function WorkspaceClient({
             <button
               type="button"
               className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white disabled:opacity-50"
-              onClick={saveInquiryBulkEdit}
+              onClick={() => saveInquiryBulkEdit("confirm")}
               disabled={inquiryBulkEditSaving}
             >
-              {inquiryBulkEditSaving ? "提交中…" : "确认修改"}
+              {inquiryBulkEditAction === "confirm" ? "提交中…" : "确认修改"}
+            </button>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+              onClick={() => saveInquiryBulkEdit("submit")}
+              disabled={inquiryBulkEditSaving}
+            >
+              {inquiryBulkEditAction === "submit" ? "提交中…" : "提交"}
             </button>
           </div>
         </EditModalShell>
@@ -3372,20 +7742,55 @@ export function WorkspaceClient({
       {editing ? (
         (() => {
           const body = (
-            <>
+            <div
+              onCompositionStartCapture={() => {
+                editModalComposingRef.current = true;
+                setIsComposing(true);
+              }}
+              onCompositionEndCapture={() => {
+                editModalComposingRef.current = false;
+                setIsComposing(false);
+              }}
+            >
               {schema ? (
               <div className="mt-3 max-h-[70vh] overflow-auto rounded-lg border border-border bg-surface-2 p-3">
                 {(() => {
-                  const fields = visibleFields.filter(
+                  const baseFields = visibleFields.filter(
                     (f) => f !== "创建时间" && f !== "最后更新时间" && f !== "运营人员" && f !== "状态",
                   );
+                  const selectionDataAllowed =
+                    editCreateMode === "selectionData" && workspaceKey === "ops.selection" && editing.id == null
+                      ? new Set([
+                          "产品图片",
+                          "名称",
+                          "参考链接",
+                          "平台在售价格（Min）",
+                          "平台在售价格（Max）",
+                          "所属类目",
+                          "产品尺寸-长（厘米）",
+                          "产品尺寸-宽（厘米）",
+                          "产品尺寸-高（厘米）",
+                          "产品重量",
+                          "产品规格",
+                          "资质要求",
+                          "是否有专利风险",
+                          "预计周平均日销量",
+                          "建议采购价",
+                          "热销月份",
+                          "选品逻辑",
+                        ])
+                      : null;
+                  const fields = selectionDataAllowed ? baseFields.filter((f) => selectionDataAllowed.has(f)) : baseFields;
 
                   const isPurchaseFlow =
-                    workspaceKey === "ops.purchase" || workspaceKey === "ops.inquiry" || workspaceKey === "ops.pricing";
+                    workspaceKey === "ops.purchase" ||
+                    workspaceKey === "ops.selection" ||
+                    workspaceKey === "ops.inquiry" ||
+                    workspaceKey === "ops.pricing" ||
+                    workspaceKey === "ops.confirm";
 
                   const renderField = (f: string, opts?: { hideLabel?: boolean; wrapperClassName?: string }) => {
                     const kind = getFieldKind(f);
-                    const focusKey = `edit-${f}`;
                     const sourceForInch = getCmSourceForInchField(schema, f);
                     const maxRule = getMaxComputedRule(schema, f);
                     const multRule = getMultiplierCeilRule(schema, f);
@@ -3428,12 +7833,18 @@ export function WorkspaceClient({
                     const setValue = (next: string) =>
                       setEditing((prev) => {
                         if (!prev) return prev;
+                        return { ...prev, data: { ...prev.data, [f]: next } };
+                      });
+
+                    const setValueWithComputed = (next: string) =>
+                      setEditing((prev) => {
+                        if (!prev) return prev;
                         const nextData: Record<string, string> = { ...prev.data, [f]: next };
                         return { ...prev, data: applyComputedFields(schema, nextData) };
                       });
 
                     const isMainProductImage = isPurchaseFlow && f === "产品图片";
-                    const useRowLayout = isPurchaseFlow && !opts?.hideLabel && kind !== "image";
+                    const useRowLayout = isPurchaseFlow && workspaceKey !== "ops.confirm" && !opts?.hideLabel && kind !== "image";
                     if (f === "状态") return null;
                     if (f === "产品规格" && schema.fields.includes("产品规格输入方式")) {
                       const list =
@@ -3469,24 +7880,29 @@ export function WorkspaceClient({
                             <div className={contentClassName}>
                               <div className="flex flex-col gap-2">
                                 {list.map((it, idx) => {
-                                  const inputKey = `${focusKey}__spec-${idx}`;
                                   return (
                                     <div key={idx} className="flex items-center gap-2">
                                       <input
-                                        ref={(el) => {
-                                          editFieldRefs.current[inputKey] = el;
-                                        }}
                                         type="text"
                                         value={it}
+                                        onCompositionStart={() => {
+                                          editModalComposingRef.current = true;
+                                          setIsComposing(true);
+                                        }}
+                                        onCompositionEnd={(e) => {
+                                          editModalComposingRef.current = false;
+                                          setIsComposing(false);
+                                          const nextList = list.map((v, i) => (i === idx ? e.currentTarget.value : v));
+                                          setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
+                                          setValue(joinDelimitedValues(nextList));
+                                        }}
                                         onChange={(e) => {
-                                          pendingEditFocus.current = {
-                                            key: inputKey,
-                                            selectionStart: e.currentTarget.selectionStart,
-                                            selectionEnd: e.currentTarget.selectionEnd,
-                                          };
                                           const nextList = list.map((v, i) => (i === idx ? e.target.value : v));
                                           setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
                                           setValue(joinDelimitedValues(nextList));
+                                        }}
+                                        ref={(el) => {
+                                          editModalFieldRefs.current[`edit-${f}-${idx}`] = el;
                                         }}
                                         placeholder="请输入规格"
                                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -3728,12 +8144,14 @@ export function WorkspaceClient({
                                         const next = e.target.value;
                                         setEditing((prev) => {
                                           if (!prev) return prev;
-                                          const nextData: Record<string, string> = {
-                                            ...prev.data,
-                                            [f]: next,
-                                            [descField]: next === "是" ? prev.data[descField] ?? "" : "",
+                                          return {
+                                            ...prev,
+                                            data: {
+                                              ...prev.data,
+                                              [f]: next,
+                                              [descField]: next === "是" ? prev.data[descField] ?? "" : "",
+                                            },
                                           };
-                                          return { ...prev, data: applyComputedFields(schema, nextData) };
                                         });
                                       }}
                                       className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -3743,21 +8161,23 @@ export function WorkspaceClient({
                                     </select>
                                     {currentYesNo === "是" ? (
                                       <input
-                                        ref={(el) => {
-                                          editFieldRefs.current[`edit-${descField}`] = el;
-                                        }}
                                         value={descValue}
+                                        onCompositionStart={() => {
+                                          editModalComposingRef.current = true;
+                                          setIsComposing(true);
+                                        }}
+                                        onCompositionEnd={() => {
+                                          editModalComposingRef.current = false;
+                                          setIsComposing(false);
+                                        }}
                                         onChange={(e) => {
-                                          pendingEditFocus.current = {
-                                            key: `edit-${descField}`,
-                                            selectionStart: e.currentTarget.selectionStart,
-                                            selectionEnd: e.currentTarget.selectionEnd,
-                                          };
                                           setEditing((prev) => {
                                             if (!prev) return prev;
-                                            const nextData: Record<string, string> = { ...prev.data, [descField]: e.target.value };
-                                            return { ...prev, data: applyComputedFields(schema, nextData) };
+                                            return { ...prev, data: { ...prev.data, [descField]: e.target.value } };
                                           });
+                                        }}
+                                        ref={(el) => {
+                                          editModalFieldRefs.current[`edit-${descField}`] = el;
                                         }}
                                         placeholder="请输入风险描述"
                                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -3791,24 +8211,29 @@ export function WorkspaceClient({
                                 <div className="flex flex-col gap-2">
                                   <div className="flex flex-col gap-2">
                                     {list.map((it, idx) => {
-                                      const inputKey = `${focusKey}__spec-${idx}`;
                                       return (
                                         <div key={idx} className="flex items-center gap-2">
                                           <input
-                                            ref={(el) => {
-                                              editFieldRefs.current[inputKey] = el;
-                                            }}
                                             type="text"
                                             value={it}
+                                            onCompositionStart={() => {
+                                              editModalComposingRef.current = true;
+                                              setIsComposing(true);
+                                            }}
+                                            onCompositionEnd={(e) => {
+                                              editModalComposingRef.current = false;
+                                              setIsComposing(false);
+                                              const nextList = list.map((v, i) => (i === idx ? e.currentTarget.value : v));
+                                              setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
+                                              setValue(joinDelimitedValues(nextList));
+                                            }}
                                             onChange={(e) => {
-                                              pendingEditFocus.current = {
-                                                key: inputKey,
-                                                selectionStart: e.currentTarget.selectionStart,
-                                                selectionEnd: e.currentTarget.selectionEnd,
-                                              };
                                               const nextList = list.map((v, i) => (i === idx ? e.target.value : v));
                                               setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
                                               setValue(joinDelimitedValues(nextList));
+                                            }}
+                                            ref={(el) => {
+                                              editModalFieldRefs.current[`edit-${f}-${idx}`] = el;
                                             }}
                                             placeholder="请输入规格"
                                             className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
@@ -3861,6 +8286,17 @@ export function WorkspaceClient({
                                         }}
                                         type="url"
                                         value={it}
+                                        onCompositionStart={() => {
+                                          editModalComposingRef.current = true;
+                                          setIsComposing(true);
+                                        }}
+                                        onCompositionEnd={(e) => {
+                                          editModalComposingRef.current = false;
+                                          setIsComposing(false);
+                                          pendingLinkFocusKey.current = `${f}-${idx}`;
+                                          const nextList = list.map((v, i) => (i === idx ? e.currentTarget.value : v));
+                                          setLinkDraftByField((prev) => ({ ...prev, [f]: nextList }));
+                                        }}
                                         onChange={(e) => {
                                           pendingLinkFocusKey.current = `${f}-${idx}`;
                                           const nextList = list.map((v, i) => (i === idx ? e.target.value : v));
@@ -3937,13 +8373,25 @@ export function WorkspaceClient({
                                   </select>
                                   {selectValue === otherOption ? (
                                     <input
-                                      ref={(el) => {
-                                        editFieldRefs.current[`${focusKey}__other`] = el;
-                                      }}
                                       value={otherValue}
+                                      ref={(el) => {
+                                        editModalFieldRefs.current[`edit-${f}`] = el;
+                                      }}
+                                      onFocus={() => {
+                                        editModalLastFocusedKey.current = `edit-${f}`;
+                                      }}
+                                      onCompositionStart={() => {
+                                        editModalComposingRef.current = true;
+                                        setIsComposing(true);
+                                      }}
+                                      onCompositionEnd={(e) => {
+                                        editModalComposingRef.current = false;
+                                        setIsComposing(false);
+                                        setValue(e.currentTarget.value);
+                                      }}
                                       onChange={(e) => {
-                                        pendingEditFocus.current = {
-                                          key: `${focusKey}__other`,
+                                        pendingEditModalFocus.current = {
+                                          key: `edit-${f}`,
                                           selectionStart: e.currentTarget.selectionStart,
                                           selectionEnd: e.currentTarget.selectionEnd,
                                         };
@@ -3984,16 +8432,32 @@ export function WorkspaceClient({
                               inputMode={kind === "number" ? "decimal" : undefined}
                               value={value}
                               ref={(el) => {
-                                editFieldRefs.current[focusKey] = el;
+                                editModalFieldRefs.current[`edit-${f}`] = el;
+                              }}
+                              onFocus={() => {
+                                editModalLastFocusedKey.current = `edit-${f}`;
+                              }}
+                              onCompositionStart={() => {
+                                editModalComposingRef.current = true;
+                                setIsComposing(true);
+                              }}
+                              onCompositionEnd={(e) => {
+                                editModalComposingRef.current = false;
+                                setIsComposing(false);
+                                if (kind === "number") {
+                                  setValueWithComputed(sanitizeDecimalInput(e.currentTarget.value));
+                                  return;
+                                }
+                                setValue(e.currentTarget.value);
                               }}
                               onChange={(e) => {
-                                pendingEditFocus.current = {
-                                  key: focusKey,
-                                  selectionStart: e.currentTarget.selectionStart,
-                                  selectionEnd: e.currentTarget.selectionEnd,
-                                };
                                 if (kind === "number") {
-                                  setValue(sanitizeDecimalInput(e.target.value));
+                                  pendingEditModalFocus.current = {
+                                    key: `edit-${f}`,
+                                    selectionStart: e.currentTarget.selectionStart,
+                                    selectionEnd: e.currentTarget.selectionEnd,
+                                  };
+                                  setValueWithComputed(sanitizeDecimalInput(e.target.value));
                                   return;
                                 }
                                 setValue(e.target.value);
@@ -4012,12 +8476,7 @@ export function WorkspaceClient({
                                       const next = sanitizeDecimalInput(text);
                                       if (!next) return;
                                       e.preventDefault();
-                                      pendingEditFocus.current = {
-                                        key: focusKey,
-                                        selectionStart: null,
-                                        selectionEnd: null,
-                                      };
-                                      setValue(next);
+                                      setValueWithComputed(next);
                                     }
                                   : undefined
                               }
@@ -4040,8 +8499,1523 @@ export function WorkspaceClient({
                     return <div className="grid gap-3 sm:grid-cols-2">{fields.map((f) => renderField(f))}</div>;
                   }
 
-                  const group2 = ["产品规格"];
-                  const group3 = ["预计周平均日销量", "选品逻辑", "状态"];
+                  if (workspaceKey === "ops.confirm") {
+                    const unitBtnBase =
+                      "inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-medium transition-colors";
+                    const unitBtnActive = "border-primary bg-primary text-white";
+                    const unitBtnInactive = "border-border bg-surface text-muted hover:bg-surface-2";
+
+                    const renderDimRow = (label: string, a: string, b: string, c: string, readonly = false) => {
+                      if (!schema.fields.includes(a) || !schema.fields.includes(b) || !schema.fields.includes(c)) return null;
+                      const aRaw = editing.data[a] ?? "";
+                      const bRaw = editing.data[b] ?? "";
+                      const cRaw = editing.data[c] ?? "";
+                      const showA = confirmUnits === "cmkg" ? aRaw : cmToInchesValue(aRaw) ?? "";
+                      const showB = confirmUnits === "cmkg" ? bRaw : cmToInchesValue(bRaw) ?? "";
+                      const showC = confirmUnits === "cmkg" ? cRaw : cmToInchesValue(cRaw) ?? "";
+                      const setField = (field: string, next: string) =>
+                        setEditing((prev) => {
+                          if (!prev) return prev;
+                          const nextData: Record<string, string> = { ...prev.data, [field]: next };
+                          return { ...prev, data: applyComputedFields(schema, nextData) };
+                        });
+                      const setFromDisplay = (field: string, display: string) => {
+                        const raw = sanitizeDecimalInput(display);
+                        if (confirmUnits === "cmkg") return setField(field, raw);
+                        const cm = inchesToCmValue(raw);
+                        return setField(field, cm ?? "");
+                      };
+                      return (
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">
+                            {label}（{confirmUnits === "cmkg" ? "cm" : "in"}）
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 sm:flex-1">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={showA}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(a, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(a, next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              placeholder="长"
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={showB}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(b, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(b, next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              placeholder="宽"
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={showC}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(c, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(c, next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              placeholder="高"
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const renderWeightRow = (label: string, field: string, readonly = false) => {
+                      if (!schema.fields.includes(field)) return null;
+                      const raw = editing.data[field] ?? "";
+                      const show = confirmUnits === "cmkg" ? raw : kgToLbValue(raw) ?? "";
+                      const setField = (next: string) =>
+                        setEditing((prev) => {
+                          if (!prev) return prev;
+                          const nextData: Record<string, string> = { ...prev.data, [field]: next };
+                          return { ...prev, data: applyComputedFields(schema, nextData) };
+                        });
+                      const setFromDisplay = (display: string) => {
+                        const v = sanitizeDecimalInput(display);
+                        if (confirmUnits === "cmkg") return setField(v);
+                        const kg = lbToKgValue(v);
+                        return setField(kg ?? "");
+                      };
+                      return (
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">
+                            {label}（{confirmUnits === "cmkg" ? "kg" : "lb"}）
+                          </div>
+                          <div className="min-w-0 sm:flex-1">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={show}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const statusBadge = (() => {
+                      const status = String(editing.data["状态"] ?? "").trim();
+                      const cls =
+                        status === "待确品"
+                          ? "bg-blue-50 text-blue-600 border-blue-200"
+                          : status === "待采购"
+                            ? "bg-orange-50 text-orange-600 border-orange-200"
+                            : "bg-surface-2 text-muted border-border";
+                      return (
+                        <span className={["inline-flex items-center rounded-full border px-2 py-0.5 text-xs", cls].join(" ")}>
+                          {status || "—"}
+                        </span>
+                      );
+                    })();
+
+                    const costTotalRaw = String(editing.data["成本总计"] ?? "").trim();
+                    const costTotal = costTotalRaw ? `¥${costTotalRaw}` : "—";
+
+                    const renderCard = (titleText: string, right?: ReactNode, content?: ReactNode) => {
+                      return (
+                        <div className="rounded-2xl border border-border bg-surface p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-lg font-semibold">{titleText}</div>
+                            {right ? <div className="shrink-0">{right}</div> : null}
+                          </div>
+                          {content ? <div className="mt-4">{content}</div> : null}
+                        </div>
+                      );
+                    };
+
+                    const unitToggle = (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className={[unitBtnBase, confirmUnits === "cmkg" ? unitBtnActive : unitBtnInactive].join(" ")}
+                          onClick={() => setConfirmUnits("cmkg")}
+                        >
+                          cmkg
+                        </button>
+                        <button
+                          type="button"
+                          className={[unitBtnBase, confirmUnits === "inlb" ? unitBtnActive : unitBtnInactive].join(" ")}
+                          onClick={() => setConfirmUnits("inlb")}
+                        >
+                          英寸/英镑
+                        </button>
+                      </div>
+                    );
+
+                    const setFieldValue = (field: string, next: string) =>
+                      setEditing((prev) => {
+                        if (!prev) return prev;
+                        return { ...prev, data: applyComputedFields(schema, { ...prev.data, [field]: next }) };
+                      });
+
+                    const parsePairs = (raw: string) => {
+                      const list = parseDelimitedValues(raw);
+                      return list
+                        .map((it) => {
+                          const [a, b] = it.split("|");
+                          return { label: (a ?? "").trim(), value: (b ?? "").trim() };
+                        })
+                        .filter((it) => it.label || it.value);
+                    };
+
+                    const serializePairs = (pairs: { label: string; value: string }[]) => {
+                      return joinDelimitedValues(pairs.map((p) => `${p.label}|${p.value}`));
+                    };
+
+                    const warehouseNames = ["美西仓", "美东仓", "深圳仓"] as const;
+                    const platformNames = ["TEUM"] as const;
+                    const qtyFields = ["美西仓", "美东仓", "深圳仓"] as const;
+
+                    const renderPriceRangeRow = () => {
+                      if (!schema.fields.includes("平台在售价格（Min）") && !schema.fields.includes("平台在售价格（Max）")) return null;
+                      return (
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格区间</div>
+                          <div className="grid gap-3 sm:flex-1 sm:grid-cols-2">
+                            {schema.fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                            {schema.fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const renderReadonlyImage = () => {
+                      if (!schema.fields.includes("产品图片")) return null;
+                      const imageRaw = String(editing.data["产品图片"] ?? "");
+                      const urls = parseImageUrls(imageRaw).filter(looksLikeImagePath);
+                      const first = urls[0] ?? "";
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-muted">产品图片</div>
+                          <div className="rounded-xl border border-dashed border-border bg-surface-2 p-4">
+                            {first ? (
+                              <button
+                                type="button"
+                                className="block w-full"
+                                onClick={() => {
+                                  openImageViewer(urls, 0);
+                                }}
+                              >
+                                <Image
+                                  src={first}
+                                  alt="产品图片"
+                                  width={640}
+                                  height={360}
+                                  className="h-40 w-full rounded-lg border border-border bg-surface object-cover"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex h-40 items-center justify-center text-sm text-muted">—</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const renderReadonlyLinks = () => {
+                      if (!schema.fields.includes("参考链接")) return null;
+                      const raw = String(editing.data["参考链接"] ?? "");
+                      const list = parseDelimitedValues(raw).filter(looksLikeUrl);
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-muted">参考链接</div>
+                          {list.length === 0 ? (
+                            <div className="text-sm text-muted">—</div>
+                          ) : (
+                            <div className="flex flex-col gap-2">
+                              {list.map((u, idx) => (
+                                <a
+                                  key={`${u}-${idx}`}
+                                  href={u}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm text-foreground underline hover:bg-surface-2"
+                                  title={u}
+                                >
+                                  {u}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+
+                    return (
+                      <div className="flex flex-col gap-4">
+                        {renderCard(
+                          "基本信息",
+                          <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>,
+                          <div className="grid gap-4 sm:grid-cols-[10rem,1fr]">
+                            <div>{renderReadonlyImage()}</div>
+                            <div className="flex flex-col gap-3">
+                              {fields.includes("名称") ? renderField("名称") : null}
+                              {renderReadonlyLinks()}
+                              {renderPriceRangeRow()}
+                              {fields.includes("所属类目") ? renderField("所属类目") : null}
+                            </div>
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "产品属性",
+                          unitToggle,
+                          <div className="flex flex-col gap-3">
+                            {renderDimRow("产品尺寸", "产品尺寸-长（厘米）", "产品尺寸-宽（厘米）", "产品尺寸-高（厘米）", true)}
+                            {renderWeightRow("产品重量", "产品重量", true)}
+                            {fields.includes("产品规格") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">产品规格</div>
+                                <input
+                                  value={String(editing.data["产品规格"] ?? "")}
+                                  readOnly
+                                  disabled
+                                  className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                />
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "包裹属性",
+                          unitToggle,
+                          <div className="flex flex-col gap-3">
+                            {renderDimRow("包裹尺寸", "包裹尺寸-长（厘米）", "包裹尺寸-宽（厘米）", "包裹尺寸-高（厘米）", true)}
+                            {renderWeightRow("包裹重量", "包裹实重（公斤）", true)}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "核价信息",
+                          null,
+                          <div className="flex flex-col gap-4">
+                            <div>
+                              <div className="text-xs text-muted">成本总计（RMB）</div>
+                              <div className="mt-2 text-2xl font-bold text-foreground">{costTotal}</div>
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {fields.includes("采购成本") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">采购成本</div>
+                                  <input
+                                    value={String(editing.data["采购成本"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                              {fields.includes("头程成本") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">头程成本</div>
+                                  <input
+                                    value={String(editing.data["头程成本"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                              {fields.includes("尾程成本（人民币）") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">尾程成本（人民币）</div>
+                                  <input
+                                    value={String(editing.data["尾程成本（人民币）"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                              {fields.includes("负向成本") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">负向成本</div>
+                                  <input
+                                    value={String(editing.data["负向成本"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {fields.includes("temu报价") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">TEUM供货价</div>
+                                  <input
+                                    value={String(editing.data["temu报价"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                              {(fields.includes("平台在售价格（Min）") || fields.includes("平台在售价格（Max）")) && (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">参考销售售价（MIN，MAX）</div>
+                                  <div className="grid gap-3 sm:grid-cols-2">
+                                    <input
+                                      value={String(editing.data["平台在售价格（Min）"] ?? "")}
+                                      readOnly
+                                      disabled
+                                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                    />
+                                    <input
+                                      value={String(editing.data["平台在售价格（Max）"] ?? "")}
+                                      readOnly
+                                      disabled
+                                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "SKU信息",
+                          null,
+                          <div className="flex flex-col gap-4">
+                            {schema.fields.includes("公司物料代码") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">公司商品编码</div>
+                                <input
+                                  value={String(editing.data["公司物料代码"] ?? "")}
+                                  onChange={(e) => setFieldValue("公司物料代码", e.target.value)}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+
+                            {schema.fields.includes("仓库编码") ? (
+                              <div className="rounded-xl border border-border bg-surface p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="text-sm font-medium">仓库条码</div>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                                    onClick={() => {
+                                      const current = parsePairs(String(editing.data["仓库编码"] ?? ""));
+                                      const used = new Set(current.map((it) => it.label));
+                                      const nextLabel = warehouseNames.find((w) => !used.has(w)) ?? warehouseNames[0];
+                                      const next = [...current, { label: nextLabel, value: "" }];
+                                      setFieldValue("仓库编码", serializePairs(next));
+                                    }}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                    增加仓库条码
+                                  </button>
+                                </div>
+                                <div className="mt-4 flex flex-col gap-3">
+                                  {(() => {
+                                    const list = parsePairs(String(editing.data["仓库编码"] ?? ""));
+                                    if (list.length === 0) return <div className="text-sm text-muted">暂无</div>;
+                                    return list.map((it, idx) => {
+                                      return (
+                                        <div
+                                          key={`${it.label}-${idx}`}
+                                          className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 p-3"
+                                        >
+                                          <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-medium">
+                                            {it.label || "—"}
+                                          </div>
+                                          <input
+                                            value={it.value}
+                                            onChange={(e) => {
+                                              const next = list.map((v, i) => (i === idx ? { ...v, value: e.target.value } : v));
+                                              setFieldValue("仓库编码", serializePairs(next));
+                                            }}
+                                            className="h-10 flex-1 rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                                            onClick={() => {
+                                              const next = list.filter((_, i) => i !== idx);
+                                              setFieldValue("仓库编码", serializePairs(next));
+                                            }}
+                                            title="删除"
+                                          >
+                                            <Trash2 className="h-4 w-4 text-muted" />
+                                          </button>
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {schema.fields.includes("平台编码") ? (
+                              <div className="rounded-xl border border-border bg-surface p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="text-sm font-medium">平台编码</div>
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                                    onClick={() => {
+                                      const current = parsePairs(String(editing.data["平台编码"] ?? ""));
+                                      const used = new Set(current.map((it) => it.label));
+                                      const nextLabel = platformNames.find((p) => !used.has(p)) ?? platformNames[0];
+                                      const next = [...current, { label: nextLabel, value: "" }];
+                                      setFieldValue("平台编码", serializePairs(next));
+                                    }}
+                                  >
+                                    <Plus className="h-4 w-4" />
+                                    增加平台编码
+                                  </button>
+                                </div>
+                                <div className="mt-4 flex flex-col gap-3">
+                                  {(() => {
+                                    const list = parsePairs(String(editing.data["平台编码"] ?? ""));
+                                    if (list.length === 0) return <div className="text-sm text-muted">暂无</div>;
+                                    return list.map((it, idx) => {
+                                      return (
+                                        <div
+                                          key={`${it.label}-${idx}`}
+                                          className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 p-3"
+                                        >
+                                          <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-medium">
+                                            {it.label || "—"}
+                                          </div>
+                                          <input
+                                            value={it.value}
+                                            onChange={(e) => {
+                                              const next = list.map((v, i) => (i === idx ? { ...v, value: e.target.value } : v));
+                                              setFieldValue("平台编码", serializePairs(next));
+                                            }}
+                                            className="h-10 flex-1 rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                          />
+                                          <button
+                                            type="button"
+                                            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                                            onClick={() => {
+                                              const next = list.filter((_, i) => i !== idx);
+                                              setFieldValue("平台编码", serializePairs(next));
+                                            }}
+                                            title="删除"
+                                          >
+                                            <Trash2 className="h-4 w-4 text-muted" />
+                                          </button>
+                                        </div>
+                                      );
+                                    });
+                                  })()}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "发货信息",
+                          <button
+                            type="button"
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                            onClick={() => {
+                              const candidates = qtyFields.filter((f) => schema.fields.includes(f));
+                              const current = candidates.filter((f) => String(editing.data[f] ?? "").trim());
+                              const used = new Set(current);
+                              const next = candidates.find((f) => !used.has(f));
+                              if (!next) return;
+                              setFieldValue(next, "0");
+                            }}
+                          >
+                            <Plus className="h-4 w-4" />
+                            添加仓库
+                          </button>,
+                          <div className="flex flex-col gap-3">
+                            <div className="text-xs text-muted">多个仓库信息</div>
+                            {(() => {
+                              const candidates = qtyFields.filter((f) => schema.fields.includes(f));
+                              const active = candidates.filter((f) => String(editing.data[f] ?? "").trim());
+                              if (active.length === 0) return <div className="text-sm text-muted">暂无</div>;
+                              return active.map((f) => {
+                                const v = String(editing.data[f] ?? "");
+                                return (
+                                  <div key={f} className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 p-4">
+                                    <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-semibold">
+                                      {f}
+                                    </div>
+                                    <input
+                                      type="number"
+                                      inputMode="decimal"
+                                      value={v}
+                                      onChange={(e) => setFieldValue(f, sanitizeDecimalInput(e.target.value))}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                      }}
+                                      onWheel={(e) => {
+                                        e.currentTarget.blur();
+                                      }}
+                                      className="h-10 flex-1 rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                    />
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                                      onClick={() => setFieldValue(f, "")}
+                                      title="删除"
+                                    >
+                                      <Trash2 className="h-4 w-4 text-muted" />
+                                    </button>
+                                  </div>
+                                );
+                              });
+                            })()}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "销售预估",
+                          null,
+                          <div className="flex flex-col gap-3">
+                            {schema.fields.includes("预估来源") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">预估来源</div>
+                                <input
+                                  value={String(editing.data["预估来源"] ?? "")}
+                                  onChange={(e) => setFieldValue("预估来源", e.target.value)}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                            {schema.fields.includes("预估销量") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">预估销量</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["预估销量"] ?? "")}
+                                  onChange={(e) => setFieldValue("预估销量", sanitizeDecimalInput(e.target.value))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+                      </div>
+                    );
+                  }
+
+                  if (workspaceKey === "ops.purchase") {
+                    const unitBtnBase =
+                      "inline-flex h-7 items-center justify-center rounded-md border px-2 text-xs font-medium transition-colors";
+                    const unitBtnActive = "border-primary bg-primary text-white";
+                    const unitBtnInactive = "border-border bg-surface text-muted hover:bg-surface-2";
+
+                    const setFieldValue = (field: string, next: string) =>
+                      setEditing((prev) => {
+                        if (!prev) return prev;
+                        return { ...prev, data: applyComputedFields(schema, { ...prev.data, [field]: next }) };
+                      });
+
+                    const renderDimRow = (label: string, a: string, b: string, c: string, readonly = false) => {
+                      if (!schema.fields.includes(a) || !schema.fields.includes(b) || !schema.fields.includes(c)) return null;
+                      const aRaw = editing.data[a] ?? "";
+                      const bRaw = editing.data[b] ?? "";
+                      const cRaw = editing.data[c] ?? "";
+                      const showA = purchaseUnits === "cmkg" ? aRaw : cmToInchesValue(aRaw) ?? "";
+                      const showB = purchaseUnits === "cmkg" ? bRaw : cmToInchesValue(bRaw) ?? "";
+                      const showC = purchaseUnits === "cmkg" ? cRaw : cmToInchesValue(cRaw) ?? "";
+                      const setFromDisplay = (field: string, display: string) => {
+                        const raw = sanitizeDecimalInput(display);
+                        if (purchaseUnits === "cmkg") return setFieldValue(field, raw);
+                        const cm = inchesToCmValue(raw);
+                        return setFieldValue(field, cm ?? "");
+                      };
+                      return (
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">
+                            {label}（{purchaseUnits === "cmkg" ? "cm" : "in"}）
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 sm:flex-1">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={showA}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(a, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(a, next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              placeholder="长"
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={showB}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(b, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(b, next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              placeholder="宽"
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={showC}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(c, e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(c, next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              placeholder="高"
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const renderWeightRow = (label: string, field: string, readonly = false) => {
+                      if (!schema.fields.includes(field)) return null;
+                      const raw = editing.data[field] ?? "";
+                      const show = purchaseUnits === "cmkg" ? raw : kgToLbValue(raw) ?? "";
+                      const setFromDisplay = (display: string) => {
+                        const v = sanitizeDecimalInput(display);
+                        if (purchaseUnits === "cmkg") return setFieldValue(field, v);
+                        const kg = lbToKgValue(v);
+                        return setFieldValue(field, kg ?? "");
+                      };
+                      return (
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">
+                            {label}（{purchaseUnits === "cmkg" ? "kg" : "lb"}）
+                          </div>
+                          <div className="min-w-0 sm:flex-1">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              value={show}
+                              onChange={readonly ? undefined : (e) => setFromDisplay(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                              }}
+                              onPaste={(e) => {
+                                const text = e.clipboardData.getData("text");
+                                const next = sanitizeDecimalInput(text);
+                                if (!next) return;
+                                e.preventDefault();
+                                if (!readonly) setFromDisplay(next);
+                              }}
+                              onWheel={(e) => {
+                                e.currentTarget.blur();
+                              }}
+                              readOnly={readonly}
+                              disabled={readonly}
+                              className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none disabled:cursor-not-allowed disabled:opacity-70"
+                            />
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const unitToggle = (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          className={[unitBtnBase, purchaseUnits === "cmkg" ? unitBtnActive : unitBtnInactive].join(" ")}
+                          onClick={() => setPurchaseUnits("cmkg")}
+                        >
+                          cmkg
+                        </button>
+                        <button
+                          type="button"
+                          className={[unitBtnBase, purchaseUnits === "inlb" ? unitBtnActive : unitBtnInactive].join(" ")}
+                          onClick={() => setPurchaseUnits("inlb")}
+                        >
+                          英寸/英镑
+                        </button>
+                      </div>
+                    );
+
+                    const parsePairs = (raw: string) => {
+                      const list = parseDelimitedValues(raw);
+                      return list
+                        .map((it) => {
+                          const [a, b] = it.split("|");
+                          return { label: (a ?? "").trim(), value: (b ?? "").trim() };
+                        })
+                        .filter((it) => it.label || it.value);
+                    };
+
+                    const serializePairs = (pairs: { label: string; value: string }[]) => {
+                      return joinDelimitedValues(pairs.map((p) => `${p.label}|${p.value}`));
+                    };
+
+                    const renderCard = (titleText: string, right?: ReactNode, content?: ReactNode) => {
+                      return (
+                        <div className="rounded-2xl border border-border bg-surface p-5">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-lg font-semibold">{titleText}</div>
+                            {right ? <div className="shrink-0">{right}</div> : null}
+                          </div>
+                          {content ? <div className="mt-4">{content}</div> : null}
+                        </div>
+                      );
+                    };
+
+                    const renderReadonlyImage = () => {
+                      if (!schema.fields.includes("产品图片")) return null;
+                      const imageRaw = String(editing.data["产品图片"] ?? "");
+                      const urls = parseImageUrls(imageRaw).filter(looksLikeImagePath);
+                      const first = urls[0] ?? "";
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-muted">产品图片</div>
+                          <div className="rounded-xl border border-dashed border-border bg-surface-2 p-4">
+                            {first ? (
+                              <button
+                                type="button"
+                                className="block w-full"
+                                onClick={() => {
+                                  openImageViewer(urls, 0);
+                                }}
+                              >
+                                <Image
+                                  src={first}
+                                  alt="产品图片"
+                                  width={640}
+                                  height={360}
+                                  className="h-40 w-full rounded-lg border border-border bg-surface object-cover"
+                                />
+                              </button>
+                            ) : (
+                              <div className="flex h-40 items-center justify-center text-sm text-muted">—</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    };
+
+                    const renderReadonlyLinks = () => {
+                      if (!schema.fields.includes("参考链接")) return null;
+                      const raw = String(editing.data["参考链接"] ?? "");
+                      const list = parseDelimitedValues(raw).filter(looksLikeUrl);
+                      return (
+                        <div className="flex flex-col gap-1">
+                          <div className="text-xs text-muted">参考链接</div>
+                          {list.length === 0 ? (
+                            <div className="text-sm text-muted">—</div>
+                          ) : (
+                            <div className="flex flex-col gap-2">
+                              {list.map((u, idx) => (
+                                <a
+                                  key={`${u}-${idx}`}
+                                  href={u}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="truncate rounded-xl border border-border bg-surface px-4 py-3 text-sm text-foreground underline hover:bg-surface-2"
+                                  title={u}
+                                >
+                                  {u}
+                                </a>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    };
+
+                    const warehouseNames = ["美西仓", "美东仓", "深圳仓"] as const;
+                    const platformNames = ["TEUM"] as const;
+                    const qtyFields = ["美西仓", "美东仓", "深圳仓"] as const;
+
+                    return (
+                      <div className="flex flex-col gap-4">
+                        {renderCard(
+                          "基本信息",
+                          <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>,
+                          <div className="grid gap-4 sm:grid-cols-[10rem,1fr]">
+                            <div>{renderReadonlyImage()}</div>
+                            <div className="flex flex-col gap-3">
+                              {schema.fields.includes("名称") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">商品名称</div>
+                                  <input
+                                    value={String(editing.data["名称"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                              {renderReadonlyLinks()}
+                              {schema.fields.includes("所属类目") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">所属类目</div>
+                                  <input
+                                    value={String(editing.data["所属类目"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "SKU信息",
+                          <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>,
+                          <div className="flex flex-col gap-4">
+                            {schema.fields.includes("公司物料代码") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">公司商品编码</div>
+                                <input
+                                  value={String(editing.data["公司物料代码"] ?? "")}
+                                  onChange={(e) => setFieldValue("公司物料代码", e.target.value)}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+
+                            {schema.fields.includes("仓库编码") ? (
+                              <div className="rounded-xl border border-border bg-surface p-4">
+                                <div className="text-sm font-medium">仓库条码</div>
+                                <div className="mt-4 flex flex-col gap-3">
+                                  {(() => {
+                                    const list = parsePairs(String(editing.data["仓库编码"] ?? ""));
+                                    if (list.length === 0) return <div className="text-sm text-muted">暂无</div>;
+                                    return list.map((it, idx) => (
+                                      <div
+                                        key={`${it.label}-${idx}`}
+                                        className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 p-3"
+                                      >
+                                        <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-medium">
+                                          {it.label || "—"}
+                                        </div>
+                                        <input
+                                          value={it.value}
+                                          readOnly
+                                          disabled
+                                          className="h-10 flex-1 cursor-not-allowed rounded-xl border border-border bg-surface px-4 text-sm outline-none opacity-70"
+                                        />
+                                      </div>
+                                    ));
+                                  })()}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {schema.fields.includes("平台编码") ? (
+                              <div className="rounded-xl border border-border bg-surface p-4">
+                                <div className="text-sm font-medium">平台编码</div>
+                                <div className="mt-4 flex flex-col gap-3">
+                                  {(() => {
+                                    const list = parsePairs(String(editing.data["平台编码"] ?? ""));
+                                    if (list.length === 0) return <div className="text-sm text-muted">暂无</div>;
+                                    return list.map((it, idx) => (
+                                      <div
+                                        key={`${it.label}-${idx}`}
+                                        className="flex items-center gap-3 rounded-xl border border-border bg-surface-2 p-3"
+                                      >
+                                        <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-medium">
+                                          {it.label || "—"}
+                                        </div>
+                                        <input
+                                          value={it.value}
+                                          readOnly
+                                          disabled
+                                          className="h-10 flex-1 cursor-not-allowed rounded-xl border border-border bg-surface px-4 text-sm outline-none opacity-70"
+                                        />
+                                      </div>
+                                    ));
+                                  })()}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "产品属性",
+                          unitToggle,
+                          <div className="flex flex-col gap-3">
+                            {renderDimRow("产品尺寸", "产品尺寸-长（厘米）", "产品尺寸-宽（厘米）", "产品尺寸-高（厘米）", true)}
+                            {renderWeightRow("产品重量", "产品重量", true)}
+                            {schema.fields.includes("产品规格") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">产品规格</div>
+                                <input
+                                  value={String(editing.data["产品规格"] ?? "")}
+                                  readOnly
+                                  disabled
+                                  className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                />
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "包裹属性",
+                          unitToggle,
+                          <div className="flex flex-col gap-3">
+                            {renderDimRow("包裹尺寸", "包裹尺寸-长（厘米）", "包裹尺寸-宽（厘米）", "包裹尺寸-高（厘米）", true)}
+                            {renderWeightRow("包裹重量", "包裹实重（公斤）", true)}
+                            {schema.fields.includes("包裹计费重") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">包裹计费重</div>
+                                <input
+                                  value={String(editing.data["包裹计费重"] ?? "")}
+                                  readOnly
+                                  disabled
+                                  className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                />
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "发货信息",
+                          <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>,
+                          <div className="flex flex-col gap-4">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              {schema.fields.includes("计划采购量") ? (
+                                <div className="flex flex-col gap-1">
+                                  <div className="text-xs text-muted">计划采购量</div>
+                                  <input
+                                    value={String(editing.data["计划采购量"] ?? "")}
+                                    readOnly
+                                    disabled
+                                    className="h-12 w-full cursor-not-allowed rounded-xl border border-border bg-surface px-4 text-sm outline-none opacity-70"
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-col gap-3">
+                              <div className="text-xs text-muted">多个仓库信息</div>
+                              {(() => {
+                                const candidates = qtyFields.filter((f) => schema.fields.includes(f));
+                                const active = candidates.filter((f) => String(editing.data[f] ?? "").trim());
+                                if (active.length === 0) return <div className="text-sm text-muted">暂无</div>;
+                                return active.map((f) => {
+                                  const v = String(editing.data[f] ?? "");
+                                  return (
+                                    <div key={f} className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 p-4">
+                                      <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-semibold">
+                                        {f}
+                                      </div>
+                                      <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={v}
+                                        readOnly
+                                        disabled
+                                        className="h-10 flex-1 cursor-not-allowed rounded-xl border border-border bg-surface px-4 text-sm outline-none opacity-70"
+                                      />
+                                    </div>
+                                  );
+                                });
+                              })()}
+                            </div>
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "实际包裹属性",
+                          null,
+                          <div className="flex flex-col gap-4">
+                            {schema.fields.includes("运输包装尺寸-长（厘米）") &&
+                            schema.fields.includes("运输包装尺寸-宽（厘米）") &&
+                            schema.fields.includes("运输包装尺寸-高（厘米）") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">实际包裹尺寸（长 / 宽 / 高，cm）</div>
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={String(editing.data["运输包装尺寸-长（厘米）"] ?? "")}
+                                    onChange={(e) => setFieldValue("运输包装尺寸-长（厘米）", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => {
+                                      e.currentTarget.blur();
+                                    }}
+                                    placeholder="长"
+                                    className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                  />
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={String(editing.data["运输包装尺寸-宽（厘米）"] ?? "")}
+                                    onChange={(e) => setFieldValue("运输包装尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => {
+                                      e.currentTarget.blur();
+                                    }}
+                                    placeholder="宽"
+                                    className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                  />
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={String(editing.data["运输包装尺寸-高（厘米）"] ?? "")}
+                                    onChange={(e) => setFieldValue("运输包装尺寸-高（厘米）", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => {
+                                      e.currentTarget.blur();
+                                    }}
+                                    placeholder="高"
+                                    className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                  />
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {schema.fields.includes("运输包装实重") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">实际包裹重量（kg）</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["运输包装实重"] ?? "")}
+                                  onChange={(e) => setFieldValue("运输包装实重", sanitizeDecimalInput(e.target.value))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "下单数",
+                          null,
+                          <div className="flex flex-col gap-4">
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">总单数（箱规 × 箱数）</div>
+                                <input
+                                  value={String(editing.data["下单数"] ?? "")}
+                                  readOnly
+                                  disabled
+                                  className="h-12 w-full cursor-not-allowed rounded-xl border border-border bg-surface px-4 text-sm font-semibold outline-none opacity-70"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">箱规</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["箱规"] ?? "")}
+                                  onChange={(e) => {
+                                    const next = sanitizeDecimalInput(e.target.value);
+                                    const boxCountRaw = String(editing.data["出货箱数"] ?? "");
+                                    const boxCount = Number(sanitizeDecimalInput(boxCountRaw));
+                                    const boxSpec = Number(next);
+                                    setFieldValue("箱规", next);
+                                    if (Number.isFinite(boxSpec) && boxSpec > 0 && Number.isFinite(boxCount) && boxCount > 0) {
+                                      setFieldValue("下单数", String(Math.round(boxSpec * boxCount)));
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">箱数</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["出货箱数"] ?? "")}
+                                  onChange={(e) => {
+                                    const next = sanitizeDecimalInput(e.target.value);
+                                    const boxSpecRaw = String(editing.data["箱规"] ?? "");
+                                    const boxSpec = Number(sanitizeDecimalInput(boxSpecRaw));
+                                    const boxCount = Number(next);
+                                    setFieldValue("出货箱数", next);
+                                    if (Number.isFinite(boxSpec) && boxSpec > 0 && Number.isFinite(boxCount) && boxCount > 0) {
+                                      setFieldValue("下单数", String(Math.round(boxSpec * boxCount)));
+                                    }
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col gap-3">
+                              <div className="text-xs text-muted">各个仓数量</div>
+                              {(["美西仓", "美东仓", "深圳仓"] as const)
+                                .filter((f) => schema.fields.includes(f))
+                                .map((f) => {
+                                  const v = String(editing.data[f] ?? "");
+                                  return (
+                                    <div key={f} className="flex items-center gap-3 rounded-2xl border border-border bg-surface-2 p-4">
+                                      <div className="inline-flex h-10 min-w-20 items-center justify-center rounded-lg bg-surface px-3 text-sm font-semibold">
+                                        {f}
+                                      </div>
+                                      <input
+                                        type="number"
+                                        inputMode="decimal"
+                                        value={v}
+                                        onChange={(e) => setFieldValue(f, sanitizeDecimalInput(e.target.value))}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                        }}
+                                        onWheel={(e) => {
+                                          e.currentTarget.blur();
+                                        }}
+                                        className="h-10 flex-1 rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                      />
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "采购成本",
+                          null,
+                          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            {schema.fields.includes("采购成本总额") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">总额（¥）</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["采购成本总额"] ?? "")}
+                                  onChange={(e) => setFieldValue("采购成本总额", sanitizeDecimalInput(e.target.value))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                            {schema.fields.includes("采购成本货物") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">货物（¥）</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["采购成本货物"] ?? "")}
+                                  onChange={(e) => setFieldValue("采购成本货物", sanitizeDecimalInput(e.target.value))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                            {schema.fields.includes("采购成本物料") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">物料（¥）</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["采购成本物料"] ?? "")}
+                                  onChange={(e) => setFieldValue("采购成本物料", sanitizeDecimalInput(e.target.value))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                            {schema.fields.includes("采购成本运输") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">运输（¥）</div>
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  value={String(editing.data["采购成本运输"] ?? "")}
+                                  onChange={(e) => setFieldValue("采购成本运输", sanitizeDecimalInput(e.target.value))}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                  }}
+                                  onWheel={(e) => {
+                                    e.currentTarget.blur();
+                                  }}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "付款信息",
+                          null,
+                          <div className="flex flex-col gap-4">
+                            {schema.fields.includes("订单金额/付款方式") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">付款账号信息</div>
+                                <textarea
+                                  value={String(editing.data["订单金额/付款方式"] ?? "")}
+                                  onChange={(e) => setFieldValue("订单金额/付款方式", e.target.value)}
+                                  className="min-h-[96px] w-full resize-y rounded-xl border border-border bg-surface px-4 py-3 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                              {schema.fields.includes("预付") ? (
+                                <div className="flex flex-col gap-2">
+                                  <div className="text-xs text-muted">预付（¥）</div>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={String(editing.data["预付"] ?? "")}
+                                    onChange={(e) => setFieldValue("预付", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => {
+                                      e.currentTarget.blur();
+                                    }}
+                                    className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                  />
+                                </div>
+                              ) : null}
+                              {schema.fields.includes("尾款") ? (
+                                <div className="flex flex-col gap-2">
+                                  <div className="text-xs text-muted">尾款（¥）</div>
+                                  <input
+                                    type="number"
+                                    inputMode="decimal"
+                                    value={String(editing.data["尾款"] ?? "")}
+                                    onChange={(e) => setFieldValue("尾款", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => {
+                                      e.currentTarget.blur();
+                                    }}
+                                    className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                  />
+                                </div>
+                              ) : null}
+                            </div>
+
+                            {schema.fields.includes("阿里订单号") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">合同编号</div>
+                                <input
+                                  value={String(editing.data["阿里订单号"] ?? "")}
+                                  onChange={(e) => setFieldValue("阿里订单号", e.target.value)}
+                                  className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                                />
+                              </div>
+                            ) : null}
+
+                            {schema.fields.includes("发票附件") ? (
+                              <div className="flex flex-col gap-2">
+                                <div className="text-xs text-muted">发票附件</div>
+                                <div className="flex items-center gap-3">
+                                  <label className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 text-sm hover:bg-surface-2">
+                                    <Paperclip className="h-4 w-4" />
+                                    上传附件
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      className="hidden"
+                                      onChange={async (e) => {
+                                        const file = e.target.files?.[0] ?? null;
+                                        e.currentTarget.value = "";
+                                        if (!file) return;
+                                        setUploadingField("发票附件");
+                                        const url = await uploadImage(file);
+                                        setUploadingField(null);
+                                        if (!url) return;
+                                        const raw = String(editing.data["发票附件"] ?? "");
+                                        const existing = parseImageUrls(raw).filter(looksLikeImagePath);
+                                        const next = joinImageUrls([...existing, url]);
+                                        setFieldValue("发票附件", next);
+                                      }}
+                                      disabled={uploadingField === "发票附件"}
+                                    />
+                                  </label>
+                                  {uploadingField === "发票附件" ? <div className="text-sm text-muted">上传中…</div> : null}
+                                </div>
+                                {(() => {
+                                  const raw = String(editing.data["发票附件"] ?? "");
+                                  const urls = parseImageUrls(raw).filter(looksLikeImagePath);
+                                  if (urls.length === 0) return null;
+                                  return (
+                                    <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                                      {urls.map((u, idx) => (
+                                        <button
+                                          key={`${u}-${idx}`}
+                                          type="button"
+                                          className="block"
+                                          onClick={() => openImageViewer(urls, idx)}
+                                        >
+                                          <Image
+                                            src={u}
+                                            alt="发票附件"
+                                            width={240}
+                                            height={160}
+                                            className="h-24 w-full rounded-xl border border-border bg-surface object-cover"
+                                          />
+                                        </button>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+                              </div>
+                            ) : null}
+                          </div>,
+                        )}
+
+                        {renderCard(
+                          "发运日期",
+                          null,
+                          <div className="flex flex-col gap-2">
+                            <div className="text-xs text-muted">发运日期</div>
+                            <input
+                              type="date"
+                              value={String(editing.data["发运日期"] ?? "")}
+                              onChange={(e) => setFieldValue("发运日期", e.target.value)}
+                              className="h-12 w-full rounded-xl border border-border bg-surface px-4 text-sm outline-none"
+                            />
+                          </div>,
+                        )}
+                      </div>
+                    );
+                  }
+
+                  const group3 = ["预计周平均日销量", "建议采购价", "热销月份", "选品逻辑", "状态"];
                   const group4 = ["资质要求", "是否有专利风险"];
 
                   const renderGroup = (title: string, groupFields: string[], layout: "one" | "two" = "two") => {
@@ -4079,6 +10053,12 @@ export function WorkspaceClient({
                           ) : null}
 
                           {fields.includes("所属类目") ? <div className="sm:col-start-2">{renderField("所属类目")}</div> : null}
+
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-border bg-surface p-3">
+                        <div className="text-sm font-medium">规格信息</div>
+                        <div className="mt-3 grid gap-3">
                           {(() => {
                             if (
                               !schema.fields.includes("产品尺寸-长（厘米）") ||
@@ -4097,7 +10077,7 @@ export function WorkspaceClient({
                                 return { ...prev, data: applyComputedFields(schema, nextData) };
                               });
                             return (
-                              <div className="sm:col-start-2">
+                              <div>
                                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
                                   <div className="text-xs text-muted sm:w-28 sm:shrink-0">产品尺寸（cm）</div>
                                   <div className="grid grid-cols-3 gap-2 sm:flex-1">
@@ -4106,10 +10086,22 @@ export function WorkspaceClient({
                                       inputMode="decimal"
                                       value={len}
                                       ref={(el) => {
-                                        editFieldRefs.current["edit-产品尺寸-长（厘米）"] = el;
+                                        editModalFieldRefs.current["edit-产品尺寸-长（厘米）"] = el;
+                                      }}
+                                      onCompositionStart={() => {
+                                        editModalComposingRef.current = true;
+                                        setIsComposing(true);
+                                      }}
+                                      onCompositionEnd={() => {
+                                        editModalComposingRef.current = false;
+                                        setIsComposing(false);
                                       }}
                                       onChange={(e) => {
-                                        pendingEditFocus.current = {
+                                        if ((e.nativeEvent as { isComposing?: boolean } | null)?.isComposing) {
+                                          setField("产品尺寸-长（厘米）", sanitizeDecimalInput(e.target.value));
+                                          return;
+                                        }
+                                        pendingEditModalFocus.current = {
                                           key: "edit-产品尺寸-长（厘米）",
                                           selectionStart: e.currentTarget.selectionStart,
                                           selectionEnd: e.currentTarget.selectionEnd,
@@ -4124,7 +10116,6 @@ export function WorkspaceClient({
                                         const next = sanitizeDecimalInput(text);
                                         if (!next) return;
                                         e.preventDefault();
-                                        pendingEditFocus.current = { key: "edit-产品尺寸-长（厘米）", selectionStart: null, selectionEnd: null };
                                         setField("产品尺寸-长（厘米）", next);
                                       }}
                                       onWheel={(e) => {
@@ -4138,10 +10129,22 @@ export function WorkspaceClient({
                                       inputMode="decimal"
                                       value={wid}
                                       ref={(el) => {
-                                        editFieldRefs.current["edit-产品尺寸-宽（厘米）"] = el;
+                                        editModalFieldRefs.current["edit-产品尺寸-宽（厘米）"] = el;
+                                      }}
+                                      onCompositionStart={() => {
+                                        editModalComposingRef.current = true;
+                                        setIsComposing(true);
+                                      }}
+                                      onCompositionEnd={() => {
+                                        editModalComposingRef.current = false;
+                                        setIsComposing(false);
                                       }}
                                       onChange={(e) => {
-                                        pendingEditFocus.current = {
+                                        if ((e.nativeEvent as { isComposing?: boolean } | null)?.isComposing) {
+                                          setField("产品尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value));
+                                          return;
+                                        }
+                                        pendingEditModalFocus.current = {
                                           key: "edit-产品尺寸-宽（厘米）",
                                           selectionStart: e.currentTarget.selectionStart,
                                           selectionEnd: e.currentTarget.selectionEnd,
@@ -4156,7 +10159,6 @@ export function WorkspaceClient({
                                         const next = sanitizeDecimalInput(text);
                                         if (!next) return;
                                         e.preventDefault();
-                                        pendingEditFocus.current = { key: "edit-产品尺寸-宽（厘米）", selectionStart: null, selectionEnd: null };
                                         setField("产品尺寸-宽（厘米）", next);
                                       }}
                                       onWheel={(e) => {
@@ -4170,10 +10172,22 @@ export function WorkspaceClient({
                                       inputMode="decimal"
                                       value={hei}
                                       ref={(el) => {
-                                        editFieldRefs.current["edit-产品尺寸-高（厘米）"] = el;
+                                        editModalFieldRefs.current["edit-产品尺寸-高（厘米）"] = el;
+                                      }}
+                                      onCompositionStart={() => {
+                                        editModalComposingRef.current = true;
+                                        setIsComposing(true);
+                                      }}
+                                      onCompositionEnd={() => {
+                                        editModalComposingRef.current = false;
+                                        setIsComposing(false);
                                       }}
                                       onChange={(e) => {
-                                        pendingEditFocus.current = {
+                                        if ((e.nativeEvent as { isComposing?: boolean } | null)?.isComposing) {
+                                          setField("产品尺寸-高（厘米）", sanitizeDecimalInput(e.target.value));
+                                          return;
+                                        }
+                                        pendingEditModalFocus.current = {
                                           key: "edit-产品尺寸-高（厘米）",
                                           selectionStart: e.currentTarget.selectionStart,
                                           selectionEnd: e.currentTarget.selectionEnd,
@@ -4188,7 +10202,6 @@ export function WorkspaceClient({
                                         const next = sanitizeDecimalInput(text);
                                         if (!next) return;
                                         e.preventDefault();
-                                        pendingEditFocus.current = { key: "edit-产品尺寸-高（厘米）", selectionStart: null, selectionEnd: null };
                                         setField("产品尺寸-高（厘米）", next);
                                       }}
                                       onWheel={(e) => {
@@ -4202,10 +10215,10 @@ export function WorkspaceClient({
                               </div>
                             );
                           })()}
-                          {fields.includes("产品重量") ? <div className="sm:col-start-2">{renderField("产品重量")}</div> : null}
+                          {fields.includes("产品重量") ? renderField("产品重量") : null}
+                          {fields.includes("产品规格") ? renderField("产品规格") : null}
                         </div>
                       </div>
-                      {renderGroup("规格信息", group2, "one")}
                       {renderGroup("注意事项", group4, "one")}
                       {renderGroup("选品逻辑", group3, "one")}
                     </div>
@@ -4213,13 +10226,28 @@ export function WorkspaceClient({
                 })()}
               </div>
             ) : (
-              <textarea
-                value={editing.data.__raw__ ?? ""}
-                onChange={(e) =>
-                  setEditing((prev) => (prev ? { ...prev, data: { ...prev.data, __raw__: e.target.value } } : prev))
-                }
-                className="mt-3 h-80 w-full resize-none rounded-lg border border-border bg-surface-2 p-3 font-mono text-xs outline-none"
-              />
+            <textarea
+              value={editing.data.__raw__ ?? ""}
+              onCompositionStart={() => {
+                editModalComposingRef.current = true;
+                setIsComposing(true);
+              }}
+              onCompositionEnd={(e) => {
+                editModalComposingRef.current = false;
+                setIsComposing(false);
+                setEditing((prev) => (prev ? { ...prev, data: { ...prev.data, __raw__: e.currentTarget.value } } : prev));
+              }}
+              onChange={(e) => {
+                setEditing((prev) => (prev ? { ...prev, data: { ...prev.data, __raw__: e.target.value } } : prev));
+              }}
+              ref={(el) => {
+                editModalFieldRefs.current["edit-__raw__"] = el;
+              }}
+              onFocus={() => {
+                editModalLastFocusedKey.current = "edit-__raw__";
+              }}
+              className="mt-3 h-80 w-full resize-none rounded-lg border border-border bg-surface-2 p-3 font-mono text-xs outline-none"
+            />
             )}
             <div className="mt-3 flex justify-end gap-2">
               <button
@@ -4231,31 +10259,76 @@ export function WorkspaceClient({
               </button>
               <button
                 type="button"
-                className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white"
-                onClick={saveEdit}
+                className={[
+                  "inline-flex h-10 items-center justify-center rounded-lg border px-4 text-sm font-medium",
+                  workspaceKey === "ops.confirm"
+                    ? "border-primary bg-surface text-primary hover:bg-primary hover:text-white"
+                    : "border-primary bg-surface text-primary hover:bg-primary hover:text-white",
+                ].join(" ")}
+                onClick={() => saveEdit()}
               >
                 保存
               </button>
+              {workspaceKey === "ops.confirm" ? (
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary/90"
+                  onClick={() => saveEdit("待采购")}
+                >
+                  提交
+                </button>
+              ) : null}
+              {workspaceKey === "ops.purchase" ? (
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-primary px-4 text-sm font-medium text-white hover:bg-primary/90"
+                  onClick={() => saveEdit("待发货")}
+                >
+                  提交
+                </button>
+              ) : null}
+              {workspaceKey === "ops.selection" && (
+                <button
+                  type="button"
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-primary bg-surface px-4 text-sm font-medium text-primary hover:bg-primary hover:text-white"
+                  onClick={() => saveEdit("待分配【询价】")}
+                >
+                  提交
+                </button>
+              )}
             </div>
-            </>
+            </div>
           );
 
           if (workspaceKey === "ops.inquiry") {
             const title = editing.id ? `询价修改（ID: ${editing.id}）` : "新增询价";
-            return <InquiryEditModal title={title} body={body} />;
+            return (
+              <EditModalShell title={title} dataEditModal="inquiry" onClose={() => setEditing(null)}>
+                {body}
+              </EditModalShell>
+            );
           }
 
-          const dataEditModal = workspaceKey === "ops.purchase" ? "purchase" : "default";
+          const dataEditModal =
+            workspaceKey === "ops.purchase" || workspaceKey === "ops.selection" ? "purchase" : "default";
           const title =
-            workspaceKey === "ops.purchase"
+            workspaceKey === "ops.selection"
               ? editing.id
                 ? `选品修改（ID: ${editing.id}）`
                 : "新增选品"
-              : editing.id
-                ? `修改（ID: ${editing.id}）`
-                : "新增";
+              : workspaceKey === "ops.purchase"
+                ? editing.id
+                  ? `采购修改（ID: ${editing.id}）`
+                  : "新增采购"
+                : editing.id
+                  ? `修改（ID: ${editing.id}）`
+                  : "新增";
 
-          return <DefaultEditModal title={title} dataEditModal={dataEditModal} body={body} />;
+          return (
+            <EditModalShell title={title} dataEditModal={dataEditModal} onClose={() => setEditing(null)}>
+              {body}
+            </EditModalShell>
+          );
         })()
       ) : null}
     </div>

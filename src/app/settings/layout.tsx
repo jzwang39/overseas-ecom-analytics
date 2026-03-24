@@ -13,10 +13,12 @@ export default async function SettingsLayout({ children }: { children: React.Rea
   if (session.user.permissionLevel === "user") {
     redirect("/work");
   }
+  if (session.user.permissionLevel !== "admin" && session.user.permissionLevel !== "super_admin") {
+    redirect("/work");
+  }
 
   const allowed = await getAllowedMenuKeysByRoleId(session.user.roleId);
   const menuGroups = filterMenuGroups(allowed, true);
 
   return <AppShell menuGroups={menuGroups}>{children}</AppShell>;
 }
-

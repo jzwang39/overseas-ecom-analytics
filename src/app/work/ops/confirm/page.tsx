@@ -1,5 +1,5 @@
 import { MENU_GROUPS } from "@/lib/menu/config";
-import { ConfirmClient } from "@/app/work/ops/confirm/confirm-client";
+import { WorkspaceClient } from "../../[...slug]/workspace-client";
 
 function findLabelByHref(href: string) {
   for (const g of MENU_GROUPS) {
@@ -14,5 +14,13 @@ export default async function ConfirmPage() {
   const labels = findLabelByHref("/work/ops/confirm");
   const groupLabel = labels?.group ?? "业务运营";
   const title = labels?.item ?? "确品";
-  return <ConfirmClient groupLabel={groupLabel} title={title} />;
+  return (
+    <WorkspaceClient
+      workspaceKey="ops.confirm"
+      title={title}
+      groupLabel={groupLabel}
+      hideInquiryCreateButton
+      hideCreateButton
+    />
+  );
 }

@@ -51,16 +51,18 @@ export async function POST(req: NextRequest) {
     .object({
       name: z.string().min(1).max(64),
       description: z.string().max(255).optional(),
-      menuKeys: z.array(z.string().min(1)).min(1),
+      menuKeys: z.array(z.string().min(1)).optional(),
     })
     .safeParse(body);
 
   if (!parsed.success) return NextResponse.json({ error: "参数错误" }, { status: 400 });
 
+  const menuKeys = parsed.data.menuKeys ?? [];
+
   const pool = getPool();
   const [result] = await pool.query<ResultSetHeader>(
     "INSERT INTO roles(name, description, menu_keys) VALUES (?, ?, CAST(? AS JSON))",
-    [parsed.data.name, parsed.data.description ?? null, JSON.stringify(parsed.data.menuKeys)],
+    [parsed.data.name, parsed.data.description ?? null, JSON.stringify(menuKeys)],
   );
 
   await logOperation({
@@ -69,9 +71,8 @@ export async function POST(req: NextRequest) {
     action: "role.create",
     targetType: "role",
     targetId: String(result.insertId),
-    detail: { name: parsed.data.name, menuKeysCount: parsed.data.menuKeys.length },
+    detail: { name: parsed.data.name, menuKeysCount: menuKeys.length },
   });
 
   return NextResponse.json({ id: String(result.insertId) });
 }
-

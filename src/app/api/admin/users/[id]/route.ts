@@ -33,6 +33,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const body = await req.json().catch(() => null);
   const parsed = z
     .object({
+      username: z.string().min(1).max(64).optional(),
+      displayName: z.string().max(64).nullable().optional(),
       isDisabled: z.boolean().optional(),
       permissionLevel: z.enum(["super_admin", "admin", "user"]).optional(),
       roleId: z.string().nullable().optional(),
@@ -97,6 +99,16 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     params.push(parsed.data.isDisabled ? new Date() : null);
   }
 
+  if (parsed.data.username) {
+    updates.push("username = ?");
+    params.push(parsed.data.username);
+  }
+
+  if (parsed.data.displayName !== undefined) {
+    updates.push("display_name = ?");
+    params.push(parsed.data.displayName ?? null);
+  }
+
   if (parsed.data.permissionLevel) {
     updates.push("permission_level = ?");
     params.push(parsed.data.permissionLevel);
@@ -121,7 +133,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (updates.length === 0) return NextResponse.json({ ok: true });
 
   params.push(targetId);
-  await pool.query<ResultSetHeader>(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, params);
+  try {
+    await pool.query<ResultSetHeader>(`UPDATE users SET ${updates.join(", ")} WHERE id = ?`, params);
+  } catch (e) {
+    const err = e as { code?: string };
+    if (err?.code === "ER_DUP_ENTRY") {
+      return NextResponse.json({ error: "用户名已存在" }, { status: 400 });
+    }
+    throw e;
+  }
 
   await logOperation({
     req,

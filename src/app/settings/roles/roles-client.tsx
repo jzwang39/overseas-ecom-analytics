@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { MENU_GROUPS } from "@/lib/menu/config";
+import { useEffect, useState } from "react";
 import { SettingsTabs } from "../settings-tabs";
 
 type RoleRow = {
@@ -29,15 +28,12 @@ function parseKeys(value: unknown) {
 export function RolesClient() {
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const allMenuItems = useMemo(
-    () => MENU_GROUPS.flatMap((g) => g.items.map((it) => ({ ...it, group: g.label }))),
-    [],
-  );
+  const [editingRoleId, setEditingRoleId] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState("");
 
   const [form, setForm] = useState({
     name: "",
     description: "",
-    menuKeys: new Set<string>(),
   });
 
   async function load() {
@@ -55,23 +51,10 @@ export function RolesClient() {
     load();
   }, []);
 
-  function toggleKey(key: string) {
-    setForm((f) => {
-      const next = new Set(f.menuKeys);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return { ...f, menuKeys: next };
-    });
-  }
-
   async function createRole() {
     const name = form.name.trim();
     if (!name) {
       alert("请填写角色名称");
-      return;
-    }
-    if (form.menuKeys.size === 0) {
-      alert("请至少选择一个菜单");
       return;
     }
     if (loading) return;
@@ -83,7 +66,7 @@ export function RolesClient() {
         body: JSON.stringify({
           name,
           description: form.description.trim() || undefined,
-          menuKeys: Array.from(form.menuKeys),
+          menuKeys: [],
         }),
       });
       if (!res.ok) {
@@ -91,7 +74,7 @@ export function RolesClient() {
         alert(json.error ?? "创建失败");
         return;
       }
-      setForm({ name: "", description: "", menuKeys: new Set() });
+      setForm({ name: "", description: "" });
       await load();
     } finally {
       setLoading(false);
@@ -118,7 +101,7 @@ export function RolesClient() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-lg font-semibold">配置管理</div>
-          <div className="mt-1 text-sm text-muted">角色菜单组配置（影响左侧菜单可见性）</div>
+          <div className="mt-1 text-sm text-muted">角色管理</div>
         </div>
         <SettingsTabs />
       </div>
@@ -148,105 +131,105 @@ export function RolesClient() {
           </button>
         </div>
 
-        <div className="mt-4 overflow-hidden rounded-lg border border-border">
-          <div className="grid grid-cols-3 bg-surface-2 px-3 py-2 text-xs text-muted">
-            <div>模块</div>
-            <div>菜单</div>
-            <div className="text-right">选择</div>
+        <div className="mt-6 border-t border-border pt-6">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-medium">角色列表</div>
+            <button
+              type="button"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+              onClick={load}
+              disabled={loading}
+            >
+              {loading ? "刷新中…" : "刷新"}
+            </button>
           </div>
-          <div className="divide-y divide-border">
-            {allMenuItems.map((it) => (
-              <div key={it.key} className="grid grid-cols-3 items-center px-3 py-2 text-sm">
-                <div className="text-muted">{it.group}</div>
-                <div className="truncate">{it.label}</div>
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    className={[
-                      "inline-flex h-8 w-8 items-center justify-center rounded-lg border",
-                      form.menuKeys.has(it.key)
-                          ? "border-primary bg-surface text-primary"
-                        : "border-border bg-surface hover:bg-surface-2 text-muted",
-                    ].join(" ")}
-                    title={form.menuKeys.has(it.key) ? "已选" : "未选"}
-                    onClick={() => toggleKey(it.key)}
-                  >
-                    ✓
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
 
-      <div className="rounded-xl border border-border bg-surface p-6">
-        <div className="flex items-center justify-between gap-3">
-          <div className="text-sm font-medium">角色列表</div>
-          <button
-            type="button"
-            className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
-            onClick={load}
-            disabled={loading}
-          >
-            {loading ? "刷新中…" : "刷新"}
-          </button>
-        </div>
-
-        <div className="mt-4 overflow-hidden rounded-lg border border-border">
-          <div className="grid grid-cols-4 bg-surface-2 px-3 py-2 text-xs text-muted">
-            <div>ID</div>
-            <div>名称</div>
-            <div>菜单数</div>
-            <div className="text-right">操作</div>
-          </div>
-          <div className="divide-y divide-border">
-            {roles.map((r) => {
-              const keys = parseKeys(r.menu_keys);
-              return (
-                <div key={r.id} className="grid grid-cols-4 items-center px-3 py-2 text-sm">
-                  <div className="text-muted">{r.id}</div>
-                  <div className="truncate">{r.name}</div>
-                  <div className="text-muted">{keys.length}</div>
-                  <div className="flex justify-end gap-2">
-                    <button
-                      type="button"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                      title="编辑菜单 JSON"
-                      onClick={async () => {
-                        const text = prompt("请输入菜单 key 的 JSON 数组", JSON.stringify(keys, null, 2));
-                        if (!text) return;
-                        let next: unknown;
-                        try {
-                          next = JSON.parse(text);
-                        } catch {
-                          alert("JSON 格式错误");
-                          return;
-                        }
-                        if (!Array.isArray(next) || next.some((v) => typeof v !== "string")) {
-                          alert("必须是字符串数组");
-                          return;
-                        }
-                        await patchRole(r.id, { menuKeys: next });
-                      }}
-                    >
-                      ✎
-                    </button>
-                    <button
-                      type="button"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                      title="软删除"
-                      onClick={() => patchRole(r.id, { softDelete: true })}
-                    >
-                      ⌫
-                    </button>
+          <div className="mt-4 overflow-hidden rounded-lg border border-border">
+            <div className="grid grid-cols-4 bg-surface-2 px-3 py-2 text-xs text-muted">
+              <div>ID</div>
+              <div>名称</div>
+              <div>菜单数</div>
+              <div className="text-right">操作</div>
+            </div>
+            <div className="divide-y divide-border">
+              {roles.map((r) => {
+                const keys = parseKeys(r.menu_keys);
+                const isEditing = editingRoleId === r.id;
+                return (
+                  <div key={r.id} className="grid grid-cols-4 items-center px-3 py-2 text-sm">
+                    <div className="text-muted">{r.id}</div>
+                    <div className="min-w-0">
+                      {isEditing ? (
+                        <input
+                          value={editingName}
+                          onChange={(e) => setEditingName(e.target.value)}
+                          className="h-9 w-full rounded-lg border border-border bg-surface-2 px-3 text-sm outline-none"
+                          placeholder="角色名称"
+                        />
+                      ) : (
+                        <div className="truncate">{r.name}</div>
+                      )}
+                    </div>
+                    <div className="text-muted">{keys.length}</div>
+                    <div className="flex justify-end gap-2">
+                      {isEditing ? (
+                        <>
+                          <button
+                            type="button"
+                            disabled={loading}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                            title="保存"
+                            onClick={async () => {
+                              const name = editingName.trim();
+                              if (!name) {
+                                alert("角色名称不能为空");
+                                return;
+                              }
+                              const ok = await patchRole(r.id, { name });
+                              if (ok) setEditingRoleId(null);
+                            }}
+                          >
+                            ✓
+                          </button>
+                          <button
+                            type="button"
+                            disabled={loading}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                            title="取消"
+                            onClick={() => setEditingRoleId(null)}
+                          >
+                            ×
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                          title="修改名称"
+                          onClick={() => {
+                            setEditingRoleId(r.id);
+                            setEditingName(r.name);
+                          }}
+                        >
+                          ✎
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                        title="软删除"
+                        onClick={() => patchRole(r.id, { softDelete: true })}
+                      >
+                        ⌫
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-            {roles.length === 0 ? (
-              <div className="px-3 py-6 text-sm text-muted">暂无数据</div>
-            ) : null}
+                );
+              })}
+              {roles.length === 0 ? (
+                <div className="px-3 py-6 text-sm text-muted">暂无数据</div>
+              ) : null}
+            </div>
           </div>
         </div>
       </div>

@@ -253,6 +253,9 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const canSeeSettings =
+    data?.user?.permissionLevel === "admin" || data?.user?.permissionLevel === "super_admin";
+  const navMenuGroups = useMemo(() => menuGroups.filter((g) => g.key !== "settings"), [menuGroups]);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(menuGroups.map((g) => [g.key, true])),
   );
@@ -329,7 +332,7 @@ export function AppShell({
 
       <nav className="flex-1 overflow-auto px-2 pb-3">
         <div className="flex flex-col gap-4 py-2">
-          {menuGroups.map((group) => {
+          {navMenuGroups.map((group) => {
             const hasActive = group.items.some((it) => pathname === it.href || pathname.startsWith(`${it.href}/`));
             const expanded = hasActive ? true : (expandedGroups[group.key] ?? true);
             return (
@@ -379,25 +382,43 @@ export function AppShell({
         </div>
       </nav>
 
-      <div className="flex items-center justify-between gap-2 border-t border-border px-3 py-3">
-        {collapsed ? (
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-2">
-            <div className="text-xs">{(data?.user?.username ?? "—").slice(0, 1)}</div>
-          </div>
-        ) : (
-          <div className="min-w-0">
-            <div className="truncate text-sm">{data?.user?.username ?? "—"}</div>
-            <div className="truncate text-xs text-muted">{data?.user?.permissionLevel ?? "—"}</div>
-          </div>
-        )}
-        <button
-          type="button"
-          onClick={() => signOut({ callbackUrl: "/" })}
-          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-2 hover:bg-surface"
-          title="退出"
-        >
-          <Icon name="logout" className="h-4 w-4" />
-        </button>
+      <div className="border-t border-border px-3 py-3">
+        <div className="flex items-center justify-between gap-2">
+          {collapsed ? (
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-2">
+              <div className="text-xs">{(data?.user?.username ?? "—").slice(0, 1)}</div>
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <div className="truncate text-sm">{data?.user?.username ?? "—"}</div>
+              <div className="truncate text-xs text-muted">{data?.user?.permissionLevel ?? "—"}</div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => signOut({ callbackUrl: "/" })}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface-2 hover:bg-surface"
+            title="退出"
+          >
+            <Icon name="logout" className="h-4 w-4" />
+          </button>
+        </div>
+
+        {canSeeSettings ? (
+          <Link
+            href="/settings/roles"
+            className={[
+              "mt-2 flex h-9 items-center gap-2 rounded-lg px-2 text-sm hover:bg-surface-2",
+              pathname.startsWith("/settings") ? "bg-surface-2 text-foreground" : "text-muted",
+              collapsed ? "justify-center" : "",
+            ].join(" ")}
+            title="配置管理"
+            onClick={() => setMobileOpen(false)}
+          >
+            <Icon name="settings" className="h-4 w-4" />
+            {collapsed ? null : <div className="truncate">配置管理</div>}
+          </Link>
+        ) : null}
       </div>
 
       <div

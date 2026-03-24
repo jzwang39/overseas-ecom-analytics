@@ -44,6 +44,9 @@ export function UsersClient() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<number | null>(null);
+  const [editingUsername, setEditingUsername] = useState("");
+  const [editingDisplayName, setEditingDisplayName] = useState("");
   const [form, setForm] = useState({
     username: "",
     displayName: "",
@@ -217,74 +220,151 @@ export function UsersClient() {
             <div className="text-right">操作</div>
           </div>
           <div className="divide-y divide-border">
-            {users.map((u) => (
-              <div key={u.id} className="grid grid-cols-7 items-center px-3 py-2 text-sm">
-                <div className="text-muted">{u.id}</div>
-                <div className="truncate">{u.username}</div>
-                <div className="truncate text-muted">{u.display_name ?? "—"}</div>
-                <div>
-                  <select
-                    value={u.permission_level}
-                    onChange={(e) =>
-                      patchUser(u.id, {
-                        permissionLevel: e.target.value as UserRow["permission_level"],
-                      })
-                    }
-                    className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none"
-                    title="切换权限"
-                  >
-                    <option value="user">使用者</option>
-                    <option value="admin">管理员</option>
-                    <option value="super_admin">超级管理员</option>
-                  </select>
+            {users.map((u) => {
+              const isEditing = editingUserId === u.id;
+              return (
+                <div key={u.id} className="grid grid-cols-7 items-center px-3 py-2 text-sm">
+                  <div className="text-muted">{u.id}</div>
+                  <div className="min-w-0">
+                    {isEditing ? (
+                      <input
+                        value={editingUsername}
+                        onChange={(e) => setEditingUsername(e.target.value)}
+                        className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none"
+                        placeholder="用户名"
+                      />
+                    ) : (
+                      <div className="truncate">{u.username}</div>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    {isEditing ? (
+                      <input
+                        value={editingDisplayName}
+                        onChange={(e) => setEditingDisplayName(e.target.value)}
+                        className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none"
+                        placeholder="显示名（可选）"
+                      />
+                    ) : (
+                      <div className="truncate text-muted">{u.display_name ?? "—"}</div>
+                    )}
+                  </div>
+                  <div>
+                    <select
+                      value={u.permission_level}
+                      disabled={loading || isEditing}
+                      onChange={(e) =>
+                        patchUser(u.id, {
+                          permissionLevel: e.target.value as UserRow["permission_level"],
+                        })
+                      }
+                      className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none disabled:opacity-50"
+                      title="切换权限"
+                    >
+                      <option value="user">使用者</option>
+                      <option value="admin">管理员</option>
+                      <option value="super_admin">超级管理员</option>
+                    </select>
+                  </div>
+                  <div>
+                    <select
+                      value={u.role_id ? String(u.role_id) : ""}
+                      disabled={loading || isEditing}
+                      onChange={(e) => patchUser(u.id, { roleId: e.target.value || null })}
+                      className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none disabled:opacity-50"
+                      title="切换角色"
+                    >
+                      {roleOptions.map((r) => (
+                        <option key={r.id} value={r.id === 0 ? "" : String(r.id)}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="text-muted">{u.is_disabled ? "已禁用" : "正常"}</div>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      disabled={loading || isEditing}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                      title={u.is_disabled ? "恢复" : "禁用"}
+                      onClick={() => patchUser(u.id, { isDisabled: u.is_disabled ? false : true })}
+                    >
+                      {u.is_disabled ? "✓" : "⦸"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={loading || isEditing}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                      title="重置密码"
+                      onClick={async () => {
+                        const pwd = randomPassword();
+                        const ok = await patchUser(u.id, { resetPassword: pwd });
+                        if (ok) alert(`已重置密码：${u.username}\n新密码：${pwd}`);
+                      }}
+                    >
+                      🔑
+                    </button>
+                    {isEditing ? (
+                      <>
+                        <button
+                          type="button"
+                          disabled={loading}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                          title="保存"
+                          onClick={async () => {
+                            const username = editingUsername.trim();
+                            if (!username) {
+                              alert("用户名不能为空");
+                              return;
+                            }
+                            const displayName = editingDisplayName.trim();
+                            const ok = await patchUser(u.id, {
+                              username,
+                              displayName: displayName ? displayName : null,
+                            });
+                            if (ok) setEditingUserId(null);
+                          }}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          disabled={loading}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                          title="取消"
+                          onClick={() => setEditingUserId(null)}
+                        >
+                          ×
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
+                        title="修改"
+                        onClick={() => {
+                          setEditingUserId(u.id);
+                          setEditingUsername(u.username);
+                          setEditingDisplayName(u.display_name ?? "");
+                        }}
+                      >
+                        ✎
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={loading || isEditing}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2 disabled:opacity-50"
+                      title="软删除"
+                      onClick={() => patchUser(u.id, { softDelete: true })}
+                    >
+                      ⌫
+                    </button>
+                  </div>
                 </div>
-                <div>
-                  <select
-                    value={u.role_id ? String(u.role_id) : ""}
-                    onChange={(e) => patchUser(u.id, { roleId: e.target.value || null })}
-                    className="h-8 w-full rounded-lg border border-border bg-surface-2 px-2 text-xs outline-none"
-                    title="切换角色"
-                  >
-                    {roleOptions.map((r) => (
-                      <option key={r.id} value={r.id === 0 ? "" : String(r.id)}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="text-muted">{u.is_disabled ? "已禁用" : "正常"}</div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                    title={u.is_disabled ? "恢复" : "禁用"}
-                    onClick={() => patchUser(u.id, { isDisabled: u.is_disabled ? false : true })}
-                  >
-                    {u.is_disabled ? "✓" : "⦸"}
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                    title="重置密码"
-                    onClick={async () => {
-                      const pwd = randomPassword();
-                      const ok = await patchUser(u.id, { resetPassword: pwd });
-                      if (ok) alert(`已重置密码：${u.username}\n新密码：${pwd}`);
-                    }}
-                  >
-                    🔑
-                  </button>
-                  <button
-                    type="button"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-surface hover:bg-surface-2"
-                    title="软删除"
-                    onClick={() => patchUser(u.id, { softDelete: true })}
-                  >
-                    ⌫
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {users.length === 0 ? (
               <div className="px-3 py-6 text-sm text-muted">暂无数据</div>
             ) : null}

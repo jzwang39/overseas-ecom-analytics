@@ -41,11 +41,11 @@ export const MENU_GROUPS: MenuGroup[] = [
     label: "业务运营",
     icon: "folder",
     items: [
-      { key: "ops.purchase", label: "选品", href: "/work/ops/purchase", icon: "cart" },
+      { key: "ops.selection", label: "选品", href: "/work/ops/selection", icon: "clipboard" },
       { key: "ops.inquiry", label: "询价", href: "/work/ops/inquiry", icon: "search" },
       { key: "ops.pricing", label: "核价", href: "/work/ops/pricing", icon: "calculator" },
       { key: "ops.confirm", label: "确品", href: "/work/ops/confirm", icon: "badge-check" },
-      { key: "ops.selection", label: "采购", href: "/work/ops/selection", icon: "clipboard" },
+      { key: "ops.purchase", label: "采购", href: "/work/ops/purchase", icon: "cart" },
       {
         key: "ops.first_leg_logistics",
         label: "头程物流",
@@ -134,6 +134,7 @@ export const MENU_GROUPS: MenuGroup[] = [
       { key: "settings.users", label: "用户管理", href: "/settings/users", icon: "user" },
       { key: "settings.roles", label: "角色管理", href: "/settings/roles", icon: "shield" },
       { key: "settings.categories", label: "类目配置", href: "/settings/categories", icon: "tag" },
+      { key: "settings.menus", label: "菜单管理", href: "/settings/menus", icon: "grid" },
       { key: "settings.logs", label: "操作日志", href: "/settings/logs", icon: "file-text" },
     ],
   },
@@ -142,8 +143,7 @@ export const MENU_GROUPS: MenuGroup[] = [
 export function filterMenuGroups(allowedMenuKeys: Set<string>, canSeeSettings: boolean) {
   return MENU_GROUPS.map((g) => {
     const items = g.items.filter((it) => {
-      if (it.key.startsWith("settings.") && !canSeeSettings) return false;
-      if (it.key === "settings.categories" && canSeeSettings) return true;
+      if (it.key.startsWith("settings.")) return canSeeSettings;
       return allowedMenuKeys.has(it.key);
     });
     return { ...g, items };

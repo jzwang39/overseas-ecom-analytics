@@ -16,9 +16,15 @@ function isValidWorkspaceKey(key: string) {
   return false;
 }
 
+function normalizeAbandonReason(value: unknown) {
+  const v = typeof value === "string" ? value.trim() : "";
+  return v ? v : null;
+}
+
 function resolveStorageWorkspaceKey(key: string) {
-  if (key === "ops.inquiry") return "ops.purchase";
+  if (key === "ops.inquiry") return "ops.selection";
   if (key === "ops.pricing") return "ops.purchase";
+  if (key === "ops.confirm") return "ops.purchase";
   return key;
 }
 
@@ -78,9 +84,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
   for (const [field, value] of Object.entries(filtersParsed.data)) {
     const v = (value ?? "").trim();
     if (!v) continue;
-    where.push("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?");
-    params.push(`$."${field.replaceAll('"', '\\"')}"`);
-    params.push(`%${v}%`);
+    if (field === "放弃理由") {
+      where.push("abandon_reason LIKE ?");
+      params.push(`%${v}%`);
+    } else {
+      where.push("JSON_UNQUOTE(JSON_EXTRACT(data, ?)) LIKE ?");
+      params.push(`$."${field.replaceAll('"', '\\"')}"`);
+      params.push(`%${v}%`);
+    }
   }
 
   if (timeRangeParsed.data) {
@@ -114,10 +125,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
   }
 
   const [rows] = await pool.query<
-    (RowDataPacket & { id: number; updated_at: string; data: unknown })[]
+    (RowDataPacket & { id: number; updated_at: string; data: unknown; abandon_reason: string | null })[]
   >(
     `
-    SELECT id, updated_at, data
+    SELECT id, updated_at, data, abandon_reason
     FROM workspace_records
     WHERE ${where.join(" AND ")}
     ORDER BY id DESC
@@ -132,6 +143,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
       r.data && typeof r.data === "object" && !Array.isArray(r.data)
         ? (r.data as Record<string, unknown>)
         : {};
+    const abandonReason = normalizeAbandonReason(r.abandon_reason);
     if (!schema) {
       return {
         id: r.id,
@@ -140,7 +152,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
       };
     }
     const out: Record<string, unknown> = {};
-    for (const f of schema.fields) out[f] = dataObj[f] ?? "";
+    for (const f of schema.fields) {
+      if (f === "放弃理由" && abandonReason && !String(dataObj[f] ?? "").trim()) {
+        out[f] = abandonReason;
+        continue;
+      }
+      out[f] = dataObj[f] ?? "";
+    }
     return out;
   });
 

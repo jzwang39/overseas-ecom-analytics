@@ -11,9 +11,9 @@ export default async function WorkLayout({ children }: { children: React.ReactNo
   }
 
   const allowed = await getAllowedMenuKeysByRoleId(session.user.roleId);
-  const canSeeSettings = session.user.permissionLevel !== "user";
+  const canSeeSettings =
+    session.user.permissionLevel === "admin" || session.user.permissionLevel === "super_admin";
   const menuGroups = filterMenuGroups(allowed, canSeeSettings);
 
   return <AppShell menuGroups={menuGroups}>{children}</AppShell>;
 }
-

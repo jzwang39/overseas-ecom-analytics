@@ -28,6 +28,10 @@ function todayYmd() {
   return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
 }
 
+const INQUIRY_ASSIGNEE_ROLE_NAME = "询价员";
+const INQUIRY_STORAGE_WORKSPACE_KEY = "ops.selection";
+const INQUIRY_ASSIGNED_STATUS_VALUE = "待询价";
+
 async function isRoleName(roleId: number | null | undefined, roleName: string) {
   if (!roleId) return false;
   const pool = getPool();
@@ -60,7 +64,11 @@ export async function GET() {
 
   try {
     const isAdmin = session.user.permissionLevel !== "user";
-    const ok = isAdmin || (await isRoleName(toRoleId(session.user.roleId), "询价负责人"));
+    const roleId = toRoleId(session.user.roleId);
+    const ok =
+      isAdmin ||
+      (await isRoleName(roleId, "询价管理员")) ||
+      (await isRoleName(roleId, "询价负责人"));
     if (!ok) return NextResponse.json({ error: "无权限" }, { status: 403 });
 
     const pool = getPool();
@@ -75,7 +83,7 @@ export async function GET() {
         ORDER BY u.username ASC
         LIMIT 1000
       `,
-      ["询价人"],
+      [INQUIRY_ASSIGNEE_ROLE_NAME],
     );
 
     return NextResponse.json({
@@ -110,7 +118,8 @@ export async function PATCH(req: NextRequest) {
   try {
     const pool = getPool();
     const isAdmin = session.user.permissionLevel !== "user";
-    const isOwnerRole = await isRoleName(toRoleId(session.user.roleId), "询价负责人");
+    const roleId = toRoleId(session.user.roleId);
+    const isOwnerRole = (await isRoleName(roleId, "询价管理员")) || (await isRoleName(roleId, "询价负责人"));
     const currentUsername = typeof session.user.username === "string" ? session.user.username : "";
 
     const [assignees] = await pool.query<(RowDataPacket & { username: string })[]>(
@@ -124,16 +133,16 @@ export async function PATCH(req: NextRequest) {
           AND u.username = ?
         LIMIT 1
       `,
-      ["询价人", parsed.data.assigneeUsername],
+      [INQUIRY_ASSIGNEE_ROLE_NAME, parsed.data.assigneeUsername],
     );
-    if (assignees.length === 0) return NextResponse.json({ error: "询价人不存在或无权限" }, { status: 400 });
+    if (assignees.length === 0) return NextResponse.json({ error: "询价员不存在或无权限" }, { status: 400 });
 
     const now = todayYmd();
 
     if ("recordId" in parsed.data) {
       const [rows] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
         "SELECT id, data FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
-        [parsed.data.recordId, "ops.purchase"],
+        [parsed.data.recordId, INQUIRY_STORAGE_WORKSPACE_KEY],
       );
       if (rows.length === 0) return NextResponse.json({ error: "不存在" }, { status: 404 });
 
@@ -146,6 +155,7 @@ export async function PATCH(req: NextRequest) {
 
       const next: Record<string, unknown> = { ...obj };
       next["询价人"] = parsed.data.assigneeUsername;
+      next["状态"] = INQUIRY_ASSIGNED_STATUS_VALUE;
       next["最后更新时间"] = now;
 
       await pool.query<ResultSetHeader>("UPDATE workspace_records SET data = CAST(? AS JSON) WHERE id = ?", [
@@ -168,7 +178,7 @@ export async function PATCH(req: NextRequest) {
     const recordIds = Array.from(new Set(parsed.data.recordIds));
     const [rows] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
       "SELECT id, data FROM workspace_records WHERE id IN (?) AND workspace_key = ? AND deleted_at IS NULL",
-      [recordIds, "ops.purchase"],
+      [recordIds, INQUIRY_STORAGE_WORKSPACE_KEY],
     );
     if (rows.length !== recordIds.length) return NextResponse.json({ error: "部分记录不存在" }, { status: 404 });
 
@@ -185,12 +195,12 @@ export async function PATCH(req: NextRequest) {
     const [updated] = await pool.query<ResultSetHeader>(
       `
         UPDATE workspace_records
-        SET data = JSON_SET(data, '$."询价人"', ?, '$."最后更新时间"', ?)
+        SET data = JSON_SET(data, '$."询价人"', ?, '$."状态"', ?, '$."最后更新时间"', ?)
         WHERE id IN (?)
           AND workspace_key = ?
           AND deleted_at IS NULL
       `,
-      [parsed.data.assigneeUsername, now, recordIds, "ops.purchase"],
+      [parsed.data.assigneeUsername, INQUIRY_ASSIGNED_STATUS_VALUE, now, recordIds, INQUIRY_STORAGE_WORKSPACE_KEY],
     );
 
     for (const id of recordIds) {
