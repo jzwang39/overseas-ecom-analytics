@@ -1492,12 +1492,16 @@ export function WorkspaceClient({
       if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
       if (operatorName) data["运营人员"] = operatorName;
 
+      const stringData: Record<string, string> = {};
+      for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
+      const computedData = schema ? applyComputedFields(schema, stringData) : stringData;
+
       const endpointBase = `/api/workspace/${encodeURIComponent(workspaceKey)}/records`;
       const url = inquiryEditingId != null ? `${endpointBase}/${inquiryEditingId}` : endpointBase;
       const res = await fetch(url, {
         method: inquiryEditingId != null ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ data: computedData }),
       });
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
