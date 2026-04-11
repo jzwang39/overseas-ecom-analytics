@@ -745,14 +745,12 @@ export function WorkspaceClient({
     (row: RecordRow) => {
       const level = session?.user?.permissionLevel;
       if (level === "admin" || level === "super_admin") return true;
-      const roleName = session?.user?.roleName ?? "";
-      if (roleName.includes("询价")) return true;
       const obj = toRecordStringUnknown(row.data);
       const assignee = String(obj["询价人"] ?? "").trim();
       const currentUsername = session?.user?.username ?? "";
       return Boolean(assignee && currentUsername && assignee === currentUsername);
     },
-    [session?.user?.permissionLevel, session?.user?.roleName, session?.user?.username],
+    [session?.user?.permissionLevel, session?.user?.username],
   );
   const canSeePricingBulkAssign = useMemo(() => {
     const level = session?.user?.permissionLevel;
