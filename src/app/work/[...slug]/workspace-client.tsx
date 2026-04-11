@@ -1755,10 +1755,10 @@ export function WorkspaceClient({
         const isDisabled = u && typeof u.is_disabled === "number" ? u.is_disabled : 0;
         if (!username) continue;
         if (isDisabled) continue;
-        if (roleName !== "运营者") continue;
+        if (!roleName.includes("运营")) continue;
         list.push({ username, displayName: displayName || username });
       }
-      if (list.length === 0 && currentUsername && currentRoleName === "运营者") {
+      if (list.length === 0 && currentUsername && currentRoleName.includes("运营")) {
         list.push({ username: currentUsername, displayName: currentUsername });
       }
       setPricingAssigneeOptions(list);
