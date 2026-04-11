@@ -832,6 +832,7 @@ export function WorkspaceClient({
     moq: string;
     discountPolicy: "" | "有" | "无";
     discountNote: string;
+    deliveryCycle: string;
     packageLengthCm: string;
     packageWidthCm: string;
     packageHeightCm: string;
@@ -849,6 +850,7 @@ export function WorkspaceClient({
     moq: "",
     discountPolicy: "",
     discountNote: "",
+    deliveryCycle: "",
     packageLengthCm: "",
     packageWidthCm: "",
     packageHeightCm: "",
@@ -1473,6 +1475,7 @@ export function WorkspaceClient({
       if (moq) data["起订量"] = moq;
       if (discountPolicy) data["优惠政策"] = discountPolicy;
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
+      if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
       if (operatorName) data["运营人员"] = operatorName;
 
       const endpointBase = `/api/workspace/${encodeURIComponent(workspaceKey)}/records`;
@@ -2342,6 +2345,7 @@ export function WorkspaceClient({
         moq: String(obj["起订量"] ?? ""),
         discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
         discountNote: String(obj["优惠政策备注"] ?? ""),
+        deliveryCycle: String(obj["交货周期"] ?? ""),
         packageLengthCm: String(obj["包裹尺寸-长（厘米）"] ?? ""),
         packageWidthCm: String(obj["包裹尺寸-宽（厘米）"] ?? ""),
         packageHeightCm: String(obj["包裹尺寸-高（厘米）"] ?? ""),
@@ -6103,6 +6107,24 @@ export function WorkspaceClient({
                         <option value="有">有</option>
                         <option value="无">无</option>
                       </select>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">交货周期</div>
+                      <input
+                        value={inquiryForm.deliveryCycle}
+                        onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-create-delivery-cycle",
+                            selectionStart: e.currentTarget.selectionStart,
+                            selectionEnd: e.currentTarget.selectionEnd,
+                          };
+                          setInquiryForm((prev) => ({ ...prev, deliveryCycle: e.target.value }));
+                        }}
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-create-delivery-cycle"] = el;
+                        }}
+                        className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      />
                     </div>
                     {inquiryForm.discountPolicy === "有" ? (
                       <div className="flex flex-col gap-1 sm:col-span-2">
