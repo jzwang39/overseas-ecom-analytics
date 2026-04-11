@@ -5932,7 +5932,9 @@ export function WorkspaceClient({
                       <div className="text-xs text-muted">包裹尺寸（长 / 宽 / 高，{inquiryUnits === "cmkg" ? "cm" : "in"}）</div>
                       <div className="flex gap-2">
                         <input
+                          type="number"
                           inputMode="decimal"
+                          min="0"
                           value={
                             inquiryUnits === "cmkg"
                               ? inquiryForm.packageLengthCm
@@ -5954,6 +5956,8 @@ export function WorkspaceClient({
                               return { ...prev, packageLengthCm: cm };
                             });
                           }}
+                          onKeyDown={(e) => { if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault(); }}
+                          onWheel={(e) => e.currentTarget.blur()}
                           ref={(el) => {
                             inquiryModalFieldRefs.current["inquiry-create-package-length"] = el;
                           }}
@@ -5961,7 +5965,9 @@ export function WorkspaceClient({
                           className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                         />
                         <input
+                          type="number"
                           inputMode="decimal"
+                          min="0"
                           value={
                             inquiryUnits === "cmkg"
                               ? inquiryForm.packageWidthCm
@@ -5983,6 +5989,8 @@ export function WorkspaceClient({
                               return { ...prev, packageWidthCm: cm };
                             });
                           }}
+                          onKeyDown={(e) => { if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault(); }}
+                          onWheel={(e) => e.currentTarget.blur()}
                           ref={(el) => {
                             inquiryModalFieldRefs.current["inquiry-create-package-width"] = el;
                           }}
@@ -5990,7 +5998,9 @@ export function WorkspaceClient({
                           className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                         />
                         <input
+                          type="number"
                           inputMode="decimal"
+                          min="0"
                           value={
                             inquiryUnits === "cmkg"
                               ? inquiryForm.packageHeightCm
@@ -6012,6 +6022,8 @@ export function WorkspaceClient({
                               return { ...prev, packageHeightCm: cm };
                             });
                           }}
+                          onKeyDown={(e) => { if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault(); }}
+                          onWheel={(e) => e.currentTarget.blur()}
                           ref={(el) => {
                             inquiryModalFieldRefs.current["inquiry-create-package-height"] = el;
                           }}
@@ -6024,7 +6036,9 @@ export function WorkspaceClient({
                     <div className="flex flex-col gap-1">
                       <div className="text-xs text-muted">包裹重量（{inquiryUnits === "cmkg" ? "kg" : "lb"}）</div>
                       <input
+                        type="number"
                         inputMode="decimal"
+                        min="0"
                         value={
                           inquiryUnits === "cmkg"
                             ? inquiryForm.packageWeightKg
@@ -6046,6 +6060,8 @@ export function WorkspaceClient({
                             return { ...prev, packageWeightKg: kg };
                           });
                         }}
+                        onKeyDown={(e) => { if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault(); }}
+                        onWheel={(e) => e.currentTarget.blur()}
                         ref={(el) => {
                           inquiryModalFieldRefs.current["inquiry-create-package-weight"] = el;
                         }}
