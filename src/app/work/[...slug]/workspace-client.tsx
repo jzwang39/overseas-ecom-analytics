@@ -1060,6 +1060,7 @@ export function WorkspaceClient({
       moq: "",
       discountPolicy: "",
       discountNote: "",
+      deliveryCycle: "",
       packageLengthCm: "",
       packageWidthCm: "",
       packageHeightCm: "",
