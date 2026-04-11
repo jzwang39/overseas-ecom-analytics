@@ -520,6 +520,7 @@ function divideConstValue(data: Record<string, string>, rule: DivideConstRule) {
 }
 
 const SUM_MULTIPLY_CONST_RULES = [
+  { target: "成本总计", addends: ["采购成本", "头程成本", "尾程成本（人民币）"], factor: 1, digits: 4 },
   { target: "负向成本", addends: ["头程成本", "采购成本", "尾程成本（人民币）"], factor: 0.1, digits: 4 },
 ] as const;
 
@@ -671,16 +672,13 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     out[r.target] = copyValue(out, r) ?? "";
   }
 
-  for (const r of MULTIPLY_CONST_RULES) {
+  for (const r of SUM_MULTIPLY_RULES) {
     if (!schema.fields.includes(r.target)) continue;
-    if (!schema.fields.includes(r.source)) continue;
-    out[r.target] = multiplyConstValue(out, r) ?? "";
-  }
-
-  for (const r of DIVIDE_CONST_RULES) {
-    if (!schema.fields.includes(r.target)) continue;
-    if (!schema.fields.includes(r.source)) continue;
-    out[r.target] = divideConstValue(out, r) ?? "";
+    if (!schema.fields.includes(r.factor)) continue;
+    let ok = true;
+    for (const f of r.addends) if (!schema.fields.includes(f)) ok = false;
+    if (!ok) continue;
+    out[r.target] = sumMultiplyValue(out, r) ?? "";
   }
 
   for (const r of SUM_MULTIPLY_CONST_RULES) {
@@ -691,13 +689,16 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     out[r.target] = sumMultiplyConstValue(out, r) ?? "";
   }
 
-  for (const r of SUM_MULTIPLY_RULES) {
+  for (const r of MULTIPLY_CONST_RULES) {
     if (!schema.fields.includes(r.target)) continue;
-    if (!schema.fields.includes(r.factor)) continue;
-    let ok = true;
-    for (const f of r.addends) if (!schema.fields.includes(f)) ok = false;
-    if (!ok) continue;
-    out[r.target] = sumMultiplyValue(out, r) ?? "";
+    if (!schema.fields.includes(r.source)) continue;
+    out[r.target] = multiplyConstValue(out, r) ?? "";
+  }
+
+  for (const r of DIVIDE_CONST_RULES) {
+    if (!schema.fields.includes(r.target)) continue;
+    if (!schema.fields.includes(r.source)) continue;
+    out[r.target] = divideConstValue(out, r) ?? "";
   }
 
   return out;
@@ -8897,10 +8898,15 @@ export function WorkspaceClient({
                                 <div className="flex flex-col gap-1">
                                   <div className="text-xs text-muted">采购成本</div>
                                   <input
+                                    type="number"
+                                    inputMode="decimal"
                                     value={String(editing.data["采购成本"] ?? "")}
-                                    readOnly
-                                    disabled
-                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                    onChange={(e) => setFieldValue("采购成本", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => e.currentTarget.blur()}
+                                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                   />
                                 </div>
                               ) : null}
@@ -8908,10 +8914,15 @@ export function WorkspaceClient({
                                 <div className="flex flex-col gap-1">
                                   <div className="text-xs text-muted">头程成本</div>
                                   <input
+                                    type="number"
+                                    inputMode="decimal"
                                     value={String(editing.data["头程成本"] ?? "")}
-                                    readOnly
-                                    disabled
-                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                    onChange={(e) => setFieldValue("头程成本", sanitizeDecimalInput(e.target.value))}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                    }}
+                                    onWheel={(e) => e.currentTarget.blur()}
+                                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                                   />
                                 </div>
                               ) : null}
