@@ -28,7 +28,7 @@ function todayYmd() {
   return `${y}-${m}-${day} ${hh}:${mm}:${ss}`;
 }
 
-const INQUIRY_ASSIGNEE_ROLE_NAME = "询价员";
+const INQUIRY_ASSIGNEE_ROLE_PATTERN = "%询价%";
 const INQUIRY_STORAGE_WORKSPACE_KEY = "ops.selection";
 const INQUIRY_ASSIGNED_STATUS_VALUE = "待询价";
 
@@ -79,11 +79,11 @@ export async function GET() {
         INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
         WHERE u.deleted_at IS NULL
           AND u.is_disabled = 0
-          AND r.name = ?
+          AND r.name LIKE ?
         ORDER BY u.username ASC
         LIMIT 1000
       `,
-      [INQUIRY_ASSIGNEE_ROLE_NAME],
+      [INQUIRY_ASSIGNEE_ROLE_PATTERN],
     );
 
     return NextResponse.json({
@@ -129,11 +129,11 @@ export async function PATCH(req: NextRequest) {
         INNER JOIN roles r ON r.id = u.role_id AND r.deleted_at IS NULL
         WHERE u.deleted_at IS NULL
           AND u.is_disabled = 0
-          AND r.name = ?
+          AND r.name LIKE ?
           AND u.username = ?
         LIMIT 1
       `,
-      [INQUIRY_ASSIGNEE_ROLE_NAME, parsed.data.assigneeUsername],
+      [INQUIRY_ASSIGNEE_ROLE_PATTERN, parsed.data.assigneeUsername],
     );
     if (assignees.length === 0) return NextResponse.json({ error: "询价员不存在或无权限" }, { status: 400 });
 
