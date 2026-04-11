@@ -741,6 +741,19 @@ export function WorkspaceClient({
     const roleName = session?.user?.roleName;
     return roleName === "询价管理员" || roleName === "询价负责人";
   }, [session?.user?.permissionLevel, session?.user?.roleName]);
+  const canEditInquiryRow = useCallback(
+    (row: RecordRow) => {
+      const level = session?.user?.permissionLevel;
+      if (level === "admin" || level === "super_admin") return true;
+      const roleName = session?.user?.roleName ?? "";
+      if (roleName.includes("询价")) return true;
+      const obj = toRecordStringUnknown(row.data);
+      const assignee = String(obj["询价人"] ?? "").trim();
+      const currentUsername = session?.user?.username ?? "";
+      return Boolean(assignee && currentUsername && assignee === currentUsername);
+    },
+    [session?.user?.permissionLevel, session?.user?.roleName, session?.user?.username],
+  );
   const canSeePricingBulkAssign = useMemo(() => {
     const level = session?.user?.permissionLevel;
     if (level === "admin" || level === "super_admin") return true;
@@ -5604,8 +5617,10 @@ export function WorkspaceClient({
                                 ) : null}
                                 <button
                                   type="button"
-                                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                  className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                                   onClick={() => openEdit(row)}
+                                  disabled={workspaceKey === "ops.inquiry" && !canEditInquiryRow(row)}
+                                  title={workspaceKey === "ops.inquiry" && !canEditInquiryRow(row) ? "仅被分配的询价人可修改" : undefined}
                                 >
                                   修改
                                 </button>

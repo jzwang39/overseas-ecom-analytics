@@ -84,11 +84,30 @@ export async function PATCH(
       else return NextResponse.json({ error: "不存在" }, { status: 404 });
     }
   } else {
-    const [existing] = await pool.query<(RowDataPacket & { id: number })[]>(
-      "SELECT id FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
+    const [existing] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
+      "SELECT id, data FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
       [recordId, storageKey],
     );
     if (existing.length === 0) return NextResponse.json({ error: "不存在" }, { status: 404 });
+
+    if (key === "ops.inquiry") {
+      const isAdmin = session.user.permissionLevel !== "user";
+      if (!isAdmin) {
+        const roleName = typeof session.user.roleName === "string" ? session.user.roleName : "";
+        const isManager = roleName.includes("询价");
+        if (!isManager) {
+          const rawData = existing[0]?.data;
+          const obj = rawData && typeof rawData === "object" && !Array.isArray(rawData)
+            ? (rawData as Record<string, unknown>)
+            : {};
+          const assignee = typeof obj["询价人"] === "string" ? obj["询价人"].trim() : "";
+          const currentUsername = typeof session.user.username === "string" ? session.user.username : "";
+          if (!assignee || !currentUsername || assignee !== currentUsername) {
+            return NextResponse.json({ error: "无权限：仅被分配的询价人可修改此记录" }, { status: 403 });
+          }
+        }
+      }
+    }
   }
 
   await pool.query<ResultSetHeader>(
