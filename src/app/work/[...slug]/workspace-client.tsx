@@ -281,6 +281,7 @@ function getFieldKind(field: string): FieldKind {
   if (URL_FIELDS.has(field)) return "url";
   if (field === "所属类目") return "category";
   if (field === "是否有专利风险") return "yesno";
+  if (field === "平台在售价格模式") return "text";
   if (isNumericField(field)) return "number";
   return "text";
 }
