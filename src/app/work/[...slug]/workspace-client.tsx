@@ -18,7 +18,7 @@ type EditModalShellProps = {
 function EditModalShell({ title, dataEditModal, onClose, children }: EditModalShellProps) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-6"
       data-edit-modal={dataEditModal}
       onKeyDown={(e) => {
         const t = e.target as EventTarget | null;
@@ -27,7 +27,7 @@ function EditModalShell({ title, dataEditModal, onClose, children }: EditModalSh
         }
       }}
     >
-      <div className="w-full max-w-4xl rounded-xl border border-border bg-surface p-4">
+      <div className="my-auto w-full max-w-4xl rounded-xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-medium">{title}</div>
           <button
@@ -98,6 +98,27 @@ const INQUIRY_STATUS_VALUE = "待分配【询价】";
 const SELECTION_PENDING_STATUS_VALUE = "待选品";
 const SELECTION_ABANDON_STATUS_VALUE = "【选品】已放弃";
 const MAIN_PROCESS_OPTIONS = ["注塑", "五金", "木制", "缝制", "印刷", "玻璃", "陶瓷", "电子组装", "其他"] as const;
+const PRICING_COMPUTED_SUMMARY_FIELDS = [
+  "包裹体积（立方厘米）",
+  "体积重",
+  "包裹计费重",
+  "包裹计费重（磅）",
+  "尾程成本（人民币）",
+  "成本总计",
+  "人民币报价",
+  "temu核价最低标准（未加2.99）",
+  "temu报价",
+] as const;
+
+function getPricingComputedSummary(data: Record<string, unknown>) {
+  const lines: string[] = [];
+  for (const field of PRICING_COMPUTED_SUMMARY_FIELDS) {
+    const value = String(data[field] ?? "").trim();
+    if (!value) continue;
+    lines.push(`${field}: ${value}`);
+  }
+  return lines;
+}
 
 function displayFieldLabel(field: string) {
   if (field === "名称") return "商品名称";
@@ -1310,6 +1331,77 @@ export function WorkspaceClient({
     }
     return visibleFields.filter((f) => !WORKSPACE_TABLE_HIDDEN_FIELDS.has(f));
   }, [schema, visibleFields, workspaceKey]);
+
+  const inquiryComputedPreview = useMemo(() => {
+    if (!schema || workspaceKey !== "ops.inquiry") return [] as Array<{ field: string; value: string }>;
+
+    const data: Record<string, unknown> = {
+      名称: inquiryForm.productName,
+      产品图片: inquiryForm.productImages,
+      参考链接: inquiryForm.referenceLinks,
+      "包裹尺寸-长（厘米）": inquiryForm.packageLengthCm,
+      "包裹尺寸-宽（厘米）": inquiryForm.packageWidthCm,
+      "包裹尺寸-高（厘米）": inquiryForm.packageHeightCm,
+      "包裹实重（公斤）": inquiryForm.packageWeightKg,
+      主要工艺: inquiryForm.mainProcess,
+      工厂所在地: inquiryForm.factoryLocation,
+      工厂联系人: inquiryForm.factoryContact,
+      联系人电话: inquiryForm.factoryPhone,
+      状态: inquiryEditingStatus.trim() || "待询价",
+    };
+    if (inquiryForm.category.trim()) data["所属类目"] = inquiryForm.category.trim();
+    if (inquiryForm.productUnitPrice.trim()) data["产品单价"] = inquiryForm.productUnitPrice.trim();
+    if (inquiryForm.moq.trim()) data["起订量"] = inquiryForm.moq.trim();
+    if (inquiryForm.discountPolicy.trim()) data["优惠政策"] = inquiryForm.discountPolicy.trim();
+    if (inquiryForm.discountPolicy === "有" && inquiryForm.discountNote.trim()) data["优惠政策备注"] = inquiryForm.discountNote.trim();
+    if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
+    if (operatorName) data["运营人员"] = operatorName;
+
+    const stringData: Record<string, string> = {};
+    for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
+    const computedData = applyComputedFields(schema, stringData);
+
+    const previewFields = [
+      "体积重系数",
+      "包裹体积（立方厘米）",
+      "体积重",
+      "包裹计费重",
+      "包裹计费重（磅）",
+      "包裹尺寸-长（英寸）",
+      "包裹尺寸-宽（英寸）",
+      "包裹尺寸-高（英寸）",
+    ];
+
+    const out: Array<{ field: string; value: string }> = [];
+    for (const field of previewFields) {
+      if (!schema.fields.includes(field)) continue;
+      const value = String(computedData[field] ?? "").trim();
+      out.push({ field, value });
+    }
+    return out;
+  }, [
+    inquiryEditingStatus,
+    inquiryForm.category,
+    inquiryForm.deliveryCycle,
+    inquiryForm.discountNote,
+    inquiryForm.discountPolicy,
+    inquiryForm.factoryContact,
+    inquiryForm.factoryLocation,
+    inquiryForm.factoryPhone,
+    inquiryForm.mainProcess,
+    inquiryForm.moq,
+    inquiryForm.packageHeightCm,
+    inquiryForm.packageLengthCm,
+    inquiryForm.packageWeightKg,
+    inquiryForm.packageWidthCm,
+    inquiryForm.productImages,
+    inquiryForm.productName,
+    inquiryForm.productUnitPrice,
+    inquiryForm.referenceLinks,
+    operatorName,
+    schema,
+    workspaceKey,
+  ]);
 
   const exportUrl = useMemo(() => {
     const base = `/api/workspace/${encodeURIComponent(workspaceKey)}/export`;
@@ -4578,6 +4670,7 @@ export function WorkspaceClient({
                           参考销售售价（MIN，MAX）
                         </th>
                         <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">选品逻辑</th>
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">自动计算</th>
                         <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">状态</th>
                         <th className="whitespace-nowrap border-b border-border px-3 py-2 text-right">操作</th>
                       </tr>
@@ -4585,7 +4678,7 @@ export function WorkspaceClient({
                     <tbody className="text-sm">
                       {pricingFilteredRecords.length === 0 ? (
                         <tr>
-                          <td className="px-3 py-6 text-sm text-muted" colSpan={12}>
+                          <td className="px-3 py-6 text-sm text-muted" colSpan={13}>
                             暂无数据
                           </td>
                         </tr>
@@ -4782,6 +4875,19 @@ export function WorkspaceClient({
                               </td>
                               <td className="border-b border-border px-3 py-2 align-top text-sm text-muted">
                                 <div className="max-w-[220px] truncate">{logic || "—"}</div>
+                              </td>
+                              <td className="max-w-[300px] border-b border-border px-3 py-2 align-top text-xs text-muted">
+                                {(() => {
+                                  const lines = getPricingComputedSummary(obj);
+                                  if (lines.length === 0) return "—";
+                                  return (
+                                    <div className="space-y-1 whitespace-normal">
+                                      {lines.map((line) => (
+                                        <div key={line}>{line}</div>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="border-b border-border px-3 py-2 align-top">
                                 <span className={["inline-flex items-center rounded-full border px-2 py-0.5 text-xs", statusClassName].join(" ")}>
@@ -5470,6 +5576,9 @@ export function WorkspaceClient({
                           {displayFieldLabel(f)}
                         </th>
                       ))}
+                      {workspaceKey === "ops.pricing" ? (
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">自动计算</th>
+                      ) : null}
                       <th className="whitespace-nowrap border-b border-border px-3 py-2 text-right">操作</th>
                     </tr>
                   </thead>
@@ -5479,7 +5588,10 @@ export function WorkspaceClient({
                         <td
                           className="px-3 py-6 text-sm text-muted"
                           colSpan={
-                            tableFields.length + 1 + (workspaceKey === "ops.inquiry" || workspaceKey === "ops.pricing" ? 1 : 0)
+                            tableFields.length +
+                            1 +
+                            (workspaceKey === "ops.inquiry" || workspaceKey === "ops.pricing" ? 1 : 0) +
+                            (workspaceKey === "ops.pricing" ? 1 : 0)
                           }
                         >
                           暂无数据
@@ -5591,6 +5703,21 @@ export function WorkspaceClient({
                                 </td>
                               );
                             })}
+                            {workspaceKey === "ops.pricing" ? (
+                              <td className="max-w-[300px] border-b border-border px-3 py-2 text-xs text-muted">
+                                {(() => {
+                                  const lines = getPricingComputedSummary(obj);
+                                  if (lines.length === 0) return "—";
+                                  return (
+                                    <div className="space-y-1 whitespace-normal">
+                                      {lines.map((line) => (
+                                        <div key={line}>{line}</div>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+                              </td>
+                            ) : null}
                             <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right">
                               <div className="flex justify-end gap-2">
                                 {workspaceKey === "ops.pricing" && (status === "待分配运营者" || !operator) ? (
@@ -5806,8 +5933,8 @@ export function WorkspaceClient({
       ) : null}
 
       {inquiryCreateOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-xl border border-border bg-surface p-4">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 py-6">
+          <div className="my-auto w-full max-w-3xl max-h-[calc(100vh-3rem)] overflow-y-auto rounded-xl border border-border bg-surface p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium">
                 {inquiryEditingId != null ? `修改询价数据（ID: ${inquiryEditingId}）` : "新增询价数据"}
@@ -6290,6 +6417,20 @@ export function WorkspaceClient({
                 </div>
               </div>
             </div>
+
+            {inquiryComputedPreview.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-border bg-surface p-3">
+                <div className="text-sm font-medium">自动计算结果（保存/提交后）</div>
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {inquiryComputedPreview.map((item) => (
+                    <div key={item.field} className="rounded-lg border border-border bg-surface-2 px-3 py-2">
+                      <div className="text-xs text-muted">{item.field}</div>
+                      <div className="mt-1 text-sm">{item.value || "—"}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-3 flex items-center justify-end gap-3">
               <button
