@@ -63,6 +63,7 @@ export const PURCHASE_FIELDS: string[] = [
   "参考链接",
   "平台在售价格（Min）",
   "平台在售价格（Max）",
+  "平台在售价格模式",
   "所属类目",
   "产品规则",
   "产品规格",

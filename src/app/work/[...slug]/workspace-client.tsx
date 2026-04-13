@@ -4097,8 +4097,10 @@ export function WorkspaceClient({
                     const firstImage = images[0] || "";
                     const name = String(d["名称"] ?? "—");
                     const links = parseDelimitedValues(String(d["参考链接"] ?? "")).filter(looksLikeUrl);
-                    const minPrice = String(d["平台在售价格（Min）"] ?? "—");
-                    const maxPrice = String(d["平台在售价格（Max）"] ?? "—");
+                    const minPrice = String(d["平台在售价格（Min）"] ?? "").trim() || "—";
+                    const maxPrice = String(d["平台在售价格（Max）"] ?? "").trim() || "—";
+                    const priceMode = String(d["平台在售价格模式"] ?? "").trim();
+                    const priceDisplay = priceMode === "固定价格" ? minPrice : `Min: ${minPrice} / Max: ${maxPrice}`;
                     const category = String(d["所属类目"] ?? "—");
                     const l = String(d["产品尺寸-长（厘米）"] ?? "");
                     const w = String(d["产品尺寸-宽（厘米）"] ?? "");
@@ -4157,10 +4159,7 @@ export function WorkspaceClient({
                                 </div>
                               </td>
                               <td className="border-b border-border px-3 py-2 align-top">
-                                <div className="text-sm">
-                                  <div>Min: {minPrice}</div>
-                                  <div>Max: {maxPrice}</div>
-                                </div>
+                                <div className="text-sm">{priceDisplay}</div>
                               </td>
                               <td className="border-b border-border px-3 py-2 align-top text-sm">
                                 {category}
@@ -4615,7 +4614,8 @@ export function WorkspaceClient({
                           const temuQuote = String(obj["temu报价"] ?? "").trim();
                           const minPrice = String(obj["平台在售价格（Min）"] ?? "").trim();
                           const maxPrice = String(obj["平台在售价格（Max）"] ?? "").trim();
-                          const priceRange = minPrice && maxPrice ? `${minPrice} - ${maxPrice}` : minPrice || maxPrice || "";
+                          const priceMode = String(obj["平台在售价格模式"] ?? "").trim();
+                          const priceRange = priceMode === "固定价格" ? (minPrice || "") : (minPrice && maxPrice ? `${minPrice} - ${maxPrice}` : minPrice || maxPrice || "");
 
                           const logic = String(obj["选品逻辑"] ?? "").trim();
                           const status = String(obj["状态"] ?? "").trim();
@@ -5199,7 +5199,8 @@ export function WorkspaceClient({
                           const temuQuote = String(obj["temu报价"] ?? "").trim();
                           const minPrice = String(obj["平台在售价格（Min）"] ?? "").trim();
                           const maxPrice = String(obj["平台在售价格（Max）"] ?? "").trim();
-                          const priceRange = minPrice && maxPrice ? `${minPrice} - ${maxPrice}` : minPrice || maxPrice || "";
+                          const priceMode = String(obj["平台在售价格模式"] ?? "").trim();
+                          const priceRange = priceMode === "固定价格" ? (minPrice || "") : (minPrice && maxPrice ? `${minPrice} - ${maxPrice}` : minPrice || maxPrice || "");
 
                           const planQty = String(obj["计划采购量"] ?? "").trim();
                           const usWarehouse = String(obj["美西仓"] ?? "").trim();
@@ -8787,12 +8788,34 @@ export function WorkspaceClient({
 
                     const renderPriceRangeRow = () => {
                       if (!schema.fields.includes("平台在售价格（Min）") && !schema.fields.includes("平台在售价格（Max）")) return null;
+                      const isFixed = String(editing.data["平台在售价格模式"] ?? "") === "固定价格";
                       return (
                         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格区间</div>
-                          <div className="grid gap-3 sm:flex-1 sm:grid-cols-2">
-                            {schema.fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
-                            {schema.fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
+                          <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格</div>
+                          <div className="flex flex-1 items-center gap-2">
+                            {schema.fields.includes("平台在售价格模式") ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = isFixed ? "" : "固定价格";
+                                  setFieldValue("平台在售价格模式", next);
+                                  if (!isFixed) setFieldValue("平台在售价格（Max）", "");
+                                }}
+                                className={`shrink-0 rounded border px-2 py-1 text-xs ${isFixed ? "border-primary bg-primary/10 text-primary" : "border-border text-muted hover:border-primary/50"}`}
+                              >
+                                固定价格
+                              </button>
+                            ) : null}
+                            {isFixed ? (
+                              <div className="flex-1">
+                                {schema.fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                              </div>
+                            ) : (
+                              <div className="grid flex-1 gap-3 sm:grid-cols-2">
+                                {schema.fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                                {schema.fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -8983,21 +9006,32 @@ export function WorkspaceClient({
                               ) : null}
                               {(fields.includes("平台在售价格（Min）") || fields.includes("平台在售价格（Max）")) && (
                                 <div className="flex flex-col gap-1">
-                                  <div className="text-xs text-muted">参考销售售价（MIN，MAX）</div>
-                                  <div className="grid gap-3 sm:grid-cols-2">
+                                  <div className="text-xs text-muted">
+                                    {String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? "参考销售售价（固定价格）" : "参考销售售价（MIN，MAX）"}
+                                  </div>
+                                  {String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? (
                                     <input
                                       value={String(editing.data["平台在售价格（Min）"] ?? "")}
                                       readOnly
                                       disabled
                                       className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
                                     />
-                                    <input
-                                      value={String(editing.data["平台在售价格（Max）"] ?? "")}
-                                      readOnly
-                                      disabled
-                                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
-                                    />
-                                  </div>
+                                  ) : (
+                                    <div className="grid gap-3 sm:grid-cols-2">
+                                      <input
+                                        value={String(editing.data["平台在售价格（Min）"] ?? "")}
+                                        readOnly
+                                        disabled
+                                        className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                      />
+                                      <input
+                                        value={String(editing.data["平台在售价格（Max）"] ?? "")}
+                                        readOnly
+                                        disabled
+                                        className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                      />
+                                    </div>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -10111,10 +10145,36 @@ export function WorkspaceClient({
                           {fields.includes("平台在售价格（Min）") || fields.includes("平台在售价格（Max）") ? (
                             <div className="sm:col-start-2">
                               <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                                <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格区间</div>
-                                <div className="grid gap-3 sm:flex-1 sm:grid-cols-2">
-                                  {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
-                                  {fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
+                                <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格</div>
+                                <div className="flex flex-1 items-center gap-2">
+                                  {fields.includes("平台在售价格模式") ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const isFixed = String(editing.data["平台在售价格模式"] ?? "") === "固定价格";
+                                        const next = isFixed ? "" : "固定价格";
+                                        setEditing((prev) => {
+                                          if (!prev) return prev;
+                                          const d: Record<string, string> = { ...prev.data, "平台在售价格模式": next };
+                                          if (!isFixed) d["平台在售价格（Max）"] = "";
+                                          return { ...prev, data: d };
+                                        });
+                                      }}
+                                      className={`shrink-0 rounded border px-2 py-1 text-xs ${String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted hover:border-primary/50"}`}
+                                    >
+                                      固定价格
+                                    </button>
+                                  ) : null}
+                                  {String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? (
+                                    <div className="flex-1">
+                                      {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                                    </div>
+                                  ) : (
+                                    <div className="grid flex-1 gap-3 sm:grid-cols-2">
+                                      {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                                      {fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
