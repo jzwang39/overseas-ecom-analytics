@@ -201,6 +201,7 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
   "temu报价",
   "temu售价",
   "卖价",
+  "产品尺寸列表",
 ]);
 
 const PURCHASE_PRODUCT_SIZE_FIELDS = ["产品尺寸-长（厘米）", "产品尺寸-宽（厘米）", "产品尺寸-高（厘米）"] as const;
@@ -4103,10 +4104,16 @@ export function WorkspaceClient({
                     const priceMode = String(d["平台在售价格模式"] ?? "").trim();
                     const priceDisplay = priceMode === "固定价格" ? minPrice : `Min: ${minPrice} / Max: ${maxPrice}`;
                     const category = String(d["所属类目"] ?? "—");
+                    const rawDimList = String(d["产品尺寸列表"] ?? "").trim();
                     const l = String(d["产品尺寸-长（厘米）"] ?? "");
                     const w = String(d["产品尺寸-宽（厘米）"] ?? "");
                     const h = String(d["产品尺寸-高（厘米）"] ?? "");
-                    const size = [l, w, h].filter(Boolean).join("x") || "—";
+                    const size = rawDimList
+                      ? rawDimList.split(/[，,\r\n]+/).map((item) => {
+                          const parts = item.trim().split("×");
+                          return [(parts[0] ?? "").trim(), (parts[1] ?? "").trim(), (parts[2] ?? "").trim()].filter(Boolean).join("x");
+                        }).filter(Boolean).join(" / ") || "—"
+                      : ([l, w, h].filter(Boolean).join("x") || "—");
                     const weight = String(d["产品重量"] ?? "—");
                     const specs = String(d["产品规格"] ?? "—");
                     const weeklySales = String(d["预计周平均日销量"] ?? "—");
@@ -10196,150 +10203,108 @@ export function WorkspaceClient({
                             ) {
                               return null;
                             }
-                            const len = editing.data["产品尺寸-长（厘米）"] ?? "";
-                            const wid = editing.data["产品尺寸-宽（厘米）"] ?? "";
-                            const hei = editing.data["产品尺寸-高（厘米）"] ?? "";
-                            const setField = (field: string, next: string) =>
+                            const rawList = String(editing.data["产品尺寸列表"] ?? "").trim();
+                            const singleL = String(editing.data["产品尺寸-长（厘米）"] ?? "").trim();
+                            const singleW = String(editing.data["产品尺寸-宽（厘米）"] ?? "").trim();
+                            const singleH = String(editing.data["产品尺寸-高（厘米）"] ?? "").trim();
+                            let dims: { l: string; w: string; h: string }[];
+                            if (rawList) {
+                              const parsed = rawList.split(/[，,\r\n]+/).map((item) => {
+                                const parts = item.trim().split("×");
+                                return { l: (parts[0] ?? "").trim(), w: (parts[1] ?? "").trim(), h: (parts[2] ?? "").trim() };
+                              });
+                              dims = parsed.length > 0 ? parsed : [{ l: "", w: "", h: "" }];
+                            } else if (singleL || singleW || singleH) {
+                              dims = [{ l: singleL, w: singleW, h: singleH }];
+                            } else {
+                              dims = [{ l: "", w: "", h: "" }];
+                            }
+                            const updateDims = (newDims: { l: string; w: string; h: string }[]) => {
+                              const list = newDims.length > 0 ? newDims : [{ l: "", w: "", h: "" }];
+                              const serialized = list.map((d) => `${d.l}×${d.w}×${d.h}`).join("，");
                               setEditing((prev) => {
                                 if (!prev) return prev;
-                                const nextData: Record<string, string> = { ...prev.data, [field]: next };
+                                const nextData: Record<string, string> = {
+                                  ...prev.data,
+                                  "产品尺寸列表": serialized,
+                                  "产品尺寸-长（厘米）": list[0]?.l ?? "",
+                                  "产品尺寸-宽（厘米）": list[0]?.w ?? "",
+                                  "产品尺寸-高（厘米）": list[0]?.h ?? "",
+                                };
                                 return { ...prev, data: applyComputedFields(schema, nextData) };
                               });
+                            };
                             return (
-                              <div>
-                                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                                  <div className="text-xs text-muted sm:w-28 sm:shrink-0">产品尺寸（cm）</div>
-                                  <div className="grid grid-cols-3 gap-2 sm:flex-1">
-                                    <input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={len}
-                                      ref={(el) => {
-                                        editModalFieldRefs.current["edit-产品尺寸-长（厘米）"] = el;
-                                      }}
-                                      onCompositionStart={() => {
-                                        editModalComposingRef.current = true;
-                                        setIsComposing(true);
-                                      }}
-                                      onCompositionEnd={() => {
-                                        editModalComposingRef.current = false;
-                                        setIsComposing(false);
-                                      }}
-                                      onChange={(e) => {
-                                        if ((e.nativeEvent as { isComposing?: boolean } | null)?.isComposing) {
-                                          setField("产品尺寸-长（厘米）", sanitizeDecimalInput(e.target.value));
-                                          return;
-                                        }
-                                        pendingEditModalFocus.current = {
-                                          key: "edit-产品尺寸-长（厘米）",
-                                          selectionStart: e.currentTarget.selectionStart,
-                                          selectionEnd: e.currentTarget.selectionEnd,
-                                        };
-                                        setField("产品尺寸-长（厘米）", sanitizeDecimalInput(e.target.value));
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
-                                      }}
-                                      onPaste={(e) => {
-                                        const text = e.clipboardData.getData("text");
-                                        const next = sanitizeDecimalInput(text);
-                                        if (!next) return;
-                                        e.preventDefault();
-                                        setField("产品尺寸-长（厘米）", next);
-                                      }}
-                                      onWheel={(e) => {
-                                        e.currentTarget.blur();
-                                      }}
-                                      placeholder="长"
-                                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                                    />
-                                    <input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={wid}
-                                      ref={(el) => {
-                                        editModalFieldRefs.current["edit-产品尺寸-宽（厘米）"] = el;
-                                      }}
-                                      onCompositionStart={() => {
-                                        editModalComposingRef.current = true;
-                                        setIsComposing(true);
-                                      }}
-                                      onCompositionEnd={() => {
-                                        editModalComposingRef.current = false;
-                                        setIsComposing(false);
-                                      }}
-                                      onChange={(e) => {
-                                        if ((e.nativeEvent as { isComposing?: boolean } | null)?.isComposing) {
-                                          setField("产品尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value));
-                                          return;
-                                        }
-                                        pendingEditModalFocus.current = {
-                                          key: "edit-产品尺寸-宽（厘米）",
-                                          selectionStart: e.currentTarget.selectionStart,
-                                          selectionEnd: e.currentTarget.selectionEnd,
-                                        };
-                                        setField("产品尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value));
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
-                                      }}
-                                      onPaste={(e) => {
-                                        const text = e.clipboardData.getData("text");
-                                        const next = sanitizeDecimalInput(text);
-                                        if (!next) return;
-                                        e.preventDefault();
-                                        setField("产品尺寸-宽（厘米）", next);
-                                      }}
-                                      onWheel={(e) => {
-                                        e.currentTarget.blur();
-                                      }}
-                                      placeholder="宽"
-                                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                                    />
-                                    <input
-                                      type="number"
-                                      inputMode="decimal"
-                                      value={hei}
-                                      ref={(el) => {
-                                        editModalFieldRefs.current["edit-产品尺寸-高（厘米）"] = el;
-                                      }}
-                                      onCompositionStart={() => {
-                                        editModalComposingRef.current = true;
-                                        setIsComposing(true);
-                                      }}
-                                      onCompositionEnd={() => {
-                                        editModalComposingRef.current = false;
-                                        setIsComposing(false);
-                                      }}
-                                      onChange={(e) => {
-                                        if ((e.nativeEvent as { isComposing?: boolean } | null)?.isComposing) {
-                                          setField("产品尺寸-高（厘米）", sanitizeDecimalInput(e.target.value));
-                                          return;
-                                        }
-                                        pendingEditModalFocus.current = {
-                                          key: "edit-产品尺寸-高（厘米）",
-                                          selectionStart: e.currentTarget.selectionStart,
-                                          selectionEnd: e.currentTarget.selectionEnd,
-                                        };
-                                        setField("产品尺寸-高（厘米）", sanitizeDecimalInput(e.target.value));
-                                      }}
-                                      onKeyDown={(e) => {
-                                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
-                                      }}
-                                      onPaste={(e) => {
-                                        const text = e.clipboardData.getData("text");
-                                        const next = sanitizeDecimalInput(text);
-                                        if (!next) return;
-                                        e.preventDefault();
-                                        setField("产品尺寸-高（厘米）", next);
-                                      }}
-                                      onWheel={(e) => {
-                                        e.currentTarget.blur();
-                                      }}
-                                      placeholder="高"
-                                      className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                                    />
-                                  </div>
+                              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:gap-3">
+                                <div className="text-xs text-muted sm:w-28 sm:shrink-0 sm:pt-2">产品尺寸（cm）</div>
+                                <div className="flex flex-1 flex-col gap-2">
+                                  {dims.map((dim, idx) => (
+                                    <div key={idx} className="flex items-center gap-2">
+                                      <div className="grid flex-1 grid-cols-3 gap-2">
+                                        <input
+                                          type="number"
+                                          inputMode="decimal"
+                                          placeholder="长"
+                                          value={dim.l}
+                                          onChange={(e) => {
+                                            const next = dims.map((d, i) => i === idx ? { ...d, l: sanitizeDecimalInput(e.target.value) } : d);
+                                            updateDims(next);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                          }}
+                                          onWheel={(e) => e.currentTarget.blur()}
+                                          className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                                        />
+                                        <input
+                                          type="number"
+                                          inputMode="decimal"
+                                          placeholder="宽"
+                                          value={dim.w}
+                                          onChange={(e) => {
+                                            const next = dims.map((d, i) => i === idx ? { ...d, w: sanitizeDecimalInput(e.target.value) } : d);
+                                            updateDims(next);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                          }}
+                                          onWheel={(e) => e.currentTarget.blur()}
+                                          className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                                        />
+                                        <input
+                                          type="number"
+                                          inputMode="decimal"
+                                          placeholder="高"
+                                          value={dim.h}
+                                          onChange={(e) => {
+                                            const next = dims.map((d, i) => i === idx ? { ...d, h: sanitizeDecimalInput(e.target.value) } : d);
+                                            updateDims(next);
+                                          }}
+                                          onKeyDown={(e) => {
+                                            if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                                          }}
+                                          onWheel={(e) => e.currentTarget.blur()}
+                                          className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                                        />
+                                      </div>
+                                      {dims.length > 1 ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => updateDims(dims.filter((_, i) => i !== idx))}
+                                          className="shrink-0 rounded-lg border border-border px-2 py-1 text-xs text-muted hover:border-red-300 hover:text-red-500"
+                                        >
+                                          删除
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() => updateDims([...dims, { l: "", w: "", h: "" }])}
+                                    className="rounded-lg border border-dashed border-border bg-surface-2 py-1.5 text-xs text-muted hover:bg-surface"
+                                  >
+                                    + 添加尺寸
+                                  </button>
                                 </div>
                               </div>
                             );
