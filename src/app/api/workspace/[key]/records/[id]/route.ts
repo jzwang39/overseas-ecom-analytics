@@ -105,11 +105,19 @@ export async function PATCH(
     mergeInternalFields(normalized, existing[0]?.data);
 
     if (key === "ops.inquiry") {
+      // Merge ALL existing selection fields so we don't lose them on update
+      const rawData = existing[0]?.data;
+      if (rawData && typeof rawData === "object" && !Array.isArray(rawData)) {
+        const existingObj = rawData as Record<string, unknown>;
+        for (const [k, v] of Object.entries(existingObj)) {
+          if (!(k in normalized)) normalized[k] = v;
+        }
+      }
       const isAdmin = session.user.permissionLevel !== "user";
       if (!isAdmin) {
-        const rawData = existing[0]?.data;
-        const obj = rawData && typeof rawData === "object" && !Array.isArray(rawData)
-          ? (rawData as Record<string, unknown>)
+        const rawData2 = existing[0]?.data;
+        const obj = rawData2 && typeof rawData2 === "object" && !Array.isArray(rawData2)
+          ? (rawData2 as Record<string, unknown>)
           : {};
         const assignee = typeof obj["询价人"] === "string" ? obj["询价人"].trim() : "";
         const currentUsername = typeof session.user.username === "string" ? session.user.username : "";
@@ -160,40 +168,29 @@ export async function PATCH(
     const status = typeof normalized["状态"] === "string" ? normalized["状态"].trim() : "";
     if (status === "待核价" || status === "待分配运营者") {
       const productRule = typeof normalized["产品规则"] === "string" ? normalized["产品规则"].trim() : "";
-      const purchaseData = { ...normalized, _src_selection_id: String(recordId) };
-
-      const [existingPurchase] = await pool.query<(RowDataPacket & { id: number })[]>(
-        "SELECT id FROM workspace_records WHERE workspace_key = 'ops.purchase' AND JSON_UNQUOTE(JSON_EXTRACT(data, '$._src_selection_id')) = ? AND deleted_at IS NULL LIMIT 1",
-        [String(recordId)],
-      );
-
-      if (existingPurchase.length > 0) {
+      if (productRule) {
         await pool.query<ResultSetHeader>(
-          "UPDATE workspace_records SET data = CAST(? AS JSON), abandon_reason = ? WHERE id = ? AND workspace_key = 'ops.purchase' AND deleted_at IS NULL",
-          [JSON.stringify(purchaseData), abandonReason, existingPurchase[0]!.id],
+          "UPDATE workspace_records SET deleted_at = NOW() WHERE workspace_key = 'ops.purchase' AND product_rule = ? AND deleted_at IS NULL AND id <> ? LIMIT 1",
+          [productRule, recordId],
         );
-      } else {
-        try {
-          await pool.query<ResultSetHeader>(
-            "INSERT INTO workspace_records(workspace_key, data, abandon_reason) VALUES (?, CAST(? AS JSON), ?)",
-            ["ops.purchase", JSON.stringify(purchaseData), abandonReason],
-          );
-        } catch (err) {
-          const e = err as { code?: unknown };
-          const code = typeof e?.code === "string" ? e.code : "";
-          if (code !== "ER_DUP_ENTRY" || !productRule) throw err;
-          await pool.query<ResultSetHeader>(
-            `
-              UPDATE workspace_records
-              SET data = CAST(? AS JSON), abandon_reason = ?
-              WHERE workspace_key = ?
-                AND product_rule = ?
-                AND deleted_at IS NULL
-              LIMIT 1
-            `,
-            [JSON.stringify(purchaseData), abandonReason, "ops.purchase", productRule],
-          );
-        }
+      }
+      try {
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET workspace_key = 'ops.purchase' WHERE id = ? AND workspace_key = 'ops.selection' AND deleted_at IS NULL LIMIT 1",
+          [recordId],
+        );
+      } catch (err) {
+        const e = err as { code?: unknown };
+        const code = typeof e?.code === "string" ? e.code : "";
+        if (code !== "ER_DUP_ENTRY" || !productRule) throw err;
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET deleted_at = NOW() WHERE workspace_key = 'ops.purchase' AND product_rule = ? AND deleted_at IS NULL AND id <> ? LIMIT 1",
+          [productRule, recordId],
+        );
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET workspace_key = 'ops.purchase' WHERE id = ? AND workspace_key = 'ops.selection' AND deleted_at IS NULL LIMIT 1",
+          [recordId],
+        );
       }
     }
   }
