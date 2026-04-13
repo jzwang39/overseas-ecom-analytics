@@ -21,6 +21,14 @@ function normalizeAbandonReason(value: unknown) {
   return v ? v : null;
 }
 
+function mergeInternalFields(target: Record<string, unknown>, sourceData: unknown) {
+  if (!sourceData || typeof sourceData !== "object" || Array.isArray(sourceData)) return;
+  const src = sourceData as Record<string, unknown>;
+  for (const [k, v] of Object.entries(src)) {
+    if (k.startsWith("_") && !(k in target)) target[k] = v;
+  }
+}
+
 function resolveStorageWorkspaceKey(key: string) {
   if (key === "ops.inquiry") return "ops.selection";
   if (key === "ops.pricing") return "ops.purchase";
@@ -70,18 +78,22 @@ export async function PATCH(
   const pool = getPool();
   let storageKey = resolveStorageWorkspaceKey(key);
   if (key === "ops.confirm") {
-    const [inPurchase] = await pool.query<(RowDataPacket & { id: number })[]>(
-      "SELECT id FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
+    const [inPurchase] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
+      "SELECT id, data FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
       [recordId, "ops.purchase"],
     );
-    if (inPurchase.length > 0) storageKey = "ops.purchase";
-    else {
-      const [inSelection] = await pool.query<(RowDataPacket & { id: number })[]>(
-        "SELECT id FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
+    if (inPurchase.length > 0) {
+      storageKey = "ops.purchase";
+      mergeInternalFields(normalized, inPurchase[0]?.data);
+    } else {
+      const [inSelection] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
+        "SELECT id, data FROM workspace_records WHERE id = ? AND workspace_key = ? AND deleted_at IS NULL LIMIT 1",
         [recordId, "ops.selection"],
       );
-      if (inSelection.length > 0) storageKey = "ops.selection";
-      else return NextResponse.json({ error: "不存在" }, { status: 404 });
+      if (inSelection.length > 0) {
+        storageKey = "ops.selection";
+        mergeInternalFields(normalized, inSelection[0]?.data);
+      } else return NextResponse.json({ error: "不存在" }, { status: 404 });
     }
   } else {
     const [existing] = await pool.query<(RowDataPacket & { id: number; data: unknown })[]>(
@@ -89,6 +101,8 @@ export async function PATCH(
       [recordId, storageKey],
     );
     if (existing.length === 0) return NextResponse.json({ error: "不存在" }, { status: 404 });
+
+    mergeInternalFields(normalized, existing[0]?.data);
 
     if (key === "ops.inquiry") {
       const isAdmin = session.user.permissionLevel !== "user";
@@ -146,26 +160,40 @@ export async function PATCH(
     const status = typeof normalized["状态"] === "string" ? normalized["状态"].trim() : "";
     if (status === "待核价" || status === "待分配运营者") {
       const productRule = typeof normalized["产品规则"] === "string" ? normalized["产品规则"].trim() : "";
-      try {
+      const purchaseData = { ...normalized, _src_selection_id: String(recordId) };
+
+      const [existingPurchase] = await pool.query<(RowDataPacket & { id: number })[]>(
+        "SELECT id FROM workspace_records WHERE workspace_key = 'ops.purchase' AND JSON_UNQUOTE(JSON_EXTRACT(data, '$._src_selection_id')) = ? AND deleted_at IS NULL LIMIT 1",
+        [String(recordId)],
+      );
+
+      if (existingPurchase.length > 0) {
         await pool.query<ResultSetHeader>(
-          "INSERT INTO workspace_records(workspace_key, data, abandon_reason) VALUES (?, CAST(? AS JSON), ?)",
-          ["ops.purchase", JSON.stringify(normalized), abandonReason],
+          "UPDATE workspace_records SET data = CAST(? AS JSON), abandon_reason = ? WHERE id = ? AND workspace_key = 'ops.purchase' AND deleted_at IS NULL",
+          [JSON.stringify(purchaseData), abandonReason, existingPurchase[0]!.id],
         );
-      } catch (err) {
-        const e = err as { code?: unknown };
-        const code = typeof e?.code === "string" ? e.code : "";
-        if (code !== "ER_DUP_ENTRY" || !productRule) throw err;
-        await pool.query<ResultSetHeader>(
-          `
-            UPDATE workspace_records
-            SET data = CAST(? AS JSON), abandon_reason = ?
-            WHERE workspace_key = ?
-              AND product_rule = ?
-              AND deleted_at IS NULL
-            LIMIT 1
-          `,
-          [JSON.stringify(normalized), abandonReason, "ops.purchase", productRule],
-        );
+      } else {
+        try {
+          await pool.query<ResultSetHeader>(
+            "INSERT INTO workspace_records(workspace_key, data, abandon_reason) VALUES (?, CAST(? AS JSON), ?)",
+            ["ops.purchase", JSON.stringify(purchaseData), abandonReason],
+          );
+        } catch (err) {
+          const e = err as { code?: unknown };
+          const code = typeof e?.code === "string" ? e.code : "";
+          if (code !== "ER_DUP_ENTRY" || !productRule) throw err;
+          await pool.query<ResultSetHeader>(
+            `
+              UPDATE workspace_records
+              SET data = CAST(? AS JSON), abandon_reason = ?
+              WHERE workspace_key = ?
+                AND product_rule = ?
+                AND deleted_at IS NULL
+              LIMIT 1
+            `,
+            [JSON.stringify(purchaseData), abandonReason, "ops.purchase", productRule],
+          );
+        }
       }
     }
   }
