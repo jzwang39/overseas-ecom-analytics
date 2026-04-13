@@ -126,12 +126,16 @@ export async function PATCH(
           return NextResponse.json({ error: "无权限：仅被分配的询价人可修改此记录" }, { status: 403 });
         }
       }
-      // Run server-side computation after full data merge
-      const inquirySchema = getWorkspaceSchema("ops.selection");
-      if (inquirySchema) {
+    }
+
+    // Run server-side computation for all workspace keys that use PURCHASE_FIELDS
+    if (key === "ops.inquiry" || key === "ops.pricing" || key === "ops.purchase") {
+      const computeSchemaKey = key === "ops.inquiry" ? "ops.selection" : "ops.purchase";
+      const computeSchema = getWorkspaceSchema(computeSchemaKey);
+      if (computeSchema) {
         const stringified: Record<string, string> = {};
         for (const [k, v] of Object.entries(normalized)) stringified[k] = String(v ?? "");
-        const computed = applyComputedFields(inquirySchema, stringified);
+        const computed = applyComputedFields(computeSchema, stringified);
         for (const [k, v] of Object.entries(computed)) normalized[k] = v;
       }
     }
