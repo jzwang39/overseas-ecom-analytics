@@ -24,21 +24,29 @@ function ceilToMultiple(n: number, step: number): number | null {
  *
  * Rules applied (in order):
  * 1. 包裹体积（立方厘米）= 包裹尺寸-长 × 宽 × 高
- * 2. cm → inch conversions for matching field pairs
- * 3. MAX rules (包裹计费重, 运输包装计费重)
- * 4. MULTIPLIER_CEIL rules (包裹计费重（磅）)
- * 5. DIVIDE rules (体积重)
- * 6. RANGE_VALUE rules (运输包装体积系数)
+ * 2. 运输包装体积 = 运输包装尺寸-长 × 宽 × 高
+ * 3. cm → inch conversions for matching field pairs
+ * 4. DIVIDE rules (体积重, 运输包装体积重)
+ * 5. MAX rules (包裹计费重, 运输包装计费重)
+ * 6. MULTIPLIER_CEIL rules (包裹计费重（磅）)
  * 7. SUM_MULTIPLY rules (尾程成本（人民币）)
  * 8. SUM_MULTIPLY_CONST rules (成本总计, 负向成本)
  * 9. MULTIPLY_CONST rules (人民币报价)
  * 10. DIVIDE_CONST rules (temu pricing)
+ *
+ * Defaults applied before computation:
+ *   体积重系数 = 6000 (if not set)
+ *   运输包装体积系数 = 6000 (if not set)
  */
 export function applyComputedFields(
   schema: { fields: string[] },
   data: Record<string, string>,
 ): Record<string, string> {
   const out: Record<string, string> = { ...data };
+
+  // Apply defaults
+  if (schema.fields.includes("体积重系数") && !out["体积重系数"]) out["体积重系数"] = "6000";
+  if (schema.fields.includes("运输包装体积系数") && !out["运输包装体积系数"]) out["运输包装体积系数"] = "6000";
 
   // 1. 包裹体积（立方厘米）= L × W × H
   if (
@@ -55,7 +63,22 @@ export function applyComputedFields(
     }
   }
 
-  // 2. cm → inch conversions
+  // 2. 运输包装体积 = L × W × H
+  if (
+    schema.fields.includes("运输包装体积") &&
+    schema.fields.includes("运输包装尺寸-长（厘米）") &&
+    schema.fields.includes("运输包装尺寸-宽（厘米）") &&
+    schema.fields.includes("运输包装尺寸-高（厘米）")
+  ) {
+    const l = toFiniteNumber(out["运输包装尺寸-长（厘米）"] ?? "");
+    const w = toFiniteNumber(out["运输包装尺寸-宽（厘米）"] ?? "");
+    const h = toFiniteNumber(out["运输包装尺寸-高（厘米）"] ?? "");
+    if (l != null && w != null && h != null) {
+      out["运输包装体积"] = formatDecimal(l * w * h, 4);
+    }
+  }
+
+  // 3. cm → inch conversions
   const cmToInMap: Array<{ cm: string; inch: string }> = [
     { cm: "包裹尺寸-长（厘米）", inch: "包裹尺寸-长（英寸）" },
     { cm: "包裹尺寸-宽（厘米）", inch: "包裹尺寸-宽（英寸）" },
@@ -71,7 +94,22 @@ export function applyComputedFields(
     if (v != null) out[inch] = formatDecimal(v * CM_TO_IN, 4);
   }
 
-  // 3. MAX rules
+  // 4. DIVIDE rules
+  const divideRules = [
+    { target: "体积重", numerator: "包裹体积（立方厘米）", denominator: "体积重系数", digits: 4 },
+    { target: "运输包装体积重", numerator: "运输包装体积", denominator: "运输包装体积系数", digits: 4 },
+  ] as const;
+  for (const r of divideRules) {
+    if (!schema.fields.includes(r.target)) continue;
+    if (!schema.fields.includes(r.numerator)) continue;
+    if (!schema.fields.includes(r.denominator)) continue;
+    const a = toFiniteNumber(out[r.numerator] ?? "");
+    const b = toFiniteNumber(out[r.denominator] ?? "");
+    if (a == null || b == null || b === 0) continue;
+    out[r.target] = formatDecimal(a / b, r.digits);
+  }
+
+  // 5. MAX rules
   const maxRules = [
     { target: "包裹计费重", a: "体积重", b: "包裹实重（公斤）" },
     { target: "运输包装计费重", a: "运输包装体积重", b: "运输包装实重" },
@@ -93,7 +131,7 @@ export function applyComputedFields(
     }
   }
 
-  // 4. MULTIPLIER_CEIL rules
+  // 6. MULTIPLIER_CEIL rules
   const multiplierCeilRules = [{ target: "包裹计费重（磅）", source: "包裹计费重", factor: KG_TO_LB, step: 1 }] as const;
   for (const r of multiplierCeilRules) {
     if (!schema.fields.includes(r.target)) continue;
@@ -103,43 +141,6 @@ export function applyComputedFields(
     const result = ceilToMultiple(v * r.factor, r.step);
     if (result == null) continue;
     out[r.target] = r.step === 1 ? String(result) : formatDecimal(result, 4);
-  }
-
-  // 5. DIVIDE rules (体积重 = 包裹体积 / 体积重系数)
-  const divideRules = [{ target: "体积重", numerator: "包裹体积（立方厘米）", denominator: "体积重系数", digits: 4 }] as const;
-  for (const r of divideRules) {
-    if (!schema.fields.includes(r.target)) continue;
-    if (!schema.fields.includes(r.numerator)) continue;
-    if (!schema.fields.includes(r.denominator)) continue;
-    const a = toFiniteNumber(out[r.numerator] ?? "");
-    const b = toFiniteNumber(out[r.denominator] ?? "");
-    if (a == null || b == null || b === 0) continue;
-    out[r.target] = formatDecimal(a / b, r.digits);
-  }
-
-  // 6. RANGE_VALUE rules (运输包装体积系数)
-  const rangeValueRules = [
-    {
-      target: "运输包装体积系数",
-      source: "运输包装体积",
-      ranges: [
-        { gt: 0, lte: 5, value: "0.6" },
-        { gt: 5, lte: 10, value: "0.7" },
-        { gt: 10, lte: 20, value: "0.8" },
-      ],
-    },
-  ] as const;
-  for (const r of rangeValueRules) {
-    if (!schema.fields.includes(r.target)) continue;
-    if (!schema.fields.includes(r.source)) continue;
-    const v = toFiniteNumber(out[r.source] ?? "");
-    if (v == null) continue;
-    for (const range of r.ranges) {
-      if (v > range.gt && v <= range.lte) {
-        out[r.target] = range.value;
-        break;
-      }
-    }
   }
 
   // 7. SUM_MULTIPLY rules (尾程成本（人民币）)

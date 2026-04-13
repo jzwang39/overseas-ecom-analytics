@@ -402,7 +402,10 @@ function multiplyAndCeil(raw: string, factor: number, step: number) {
   return formatDecimal(out, 4);
 }
 
-const DIVIDE_RULES = [{ target: "体积重", numerator: "包裹体积（立方厘米）", denominator: "体积重系数", digits: 4 }] as const;
+const DIVIDE_RULES = [
+  { target: "体积重", numerator: "包裹体积（立方厘米）", denominator: "体积重系数", digits: 4 },
+  { target: "运输包装体积重", numerator: "运输包装体积", denominator: "运输包装体积系数", digits: 4 },
+] as const;
 
 type DivideRule = (typeof DIVIDE_RULES)[number];
 
@@ -425,36 +428,15 @@ function divideValue(data: Record<string, string>, rule: DivideRule) {
   return formatDecimal(a / b, rule.digits);
 }
 
-const RANGE_VALUE_RULES = [
-  {
-    target: "运输包装体积系数",
-    source: "运输包装体积",
-    ranges: [
-      { gt: 0, lte: 5, value: "0.6" },
-      { gt: 5, lte: 10, value: "0.7" },
-      { gt: 10, lte: 20, value: "0.8" },
-    ],
-  },
-] as const;
+const RANGE_VALUE_RULES: ReadonlyArray<never> = [];
 
-type RangeValueRule = (typeof RANGE_VALUE_RULES)[number];
+type RangeValueRule = never;
 
-function getRangeValueRule(schema: { fields: string[] } | null, target: string): RangeValueRule | null {
-  if (!schema) return null;
-  for (const r of RANGE_VALUE_RULES) {
-    if (r.target !== target) continue;
-    if (!schema.fields.includes(r.source)) return null;
-    return r;
-  }
+function getRangeValueRule(_schema: { fields: string[] } | null, _target: string): RangeValueRule | null {
   return null;
 }
 
-function mapRangeValue(raw: string, rule: RangeValueRule) {
-  const v = toFiniteNumber(raw);
-  if (v == null) return null;
-  for (const r of rule.ranges) {
-    if (v > r.gt && v <= r.lte) return r.value;
-  }
+function mapRangeValue(_raw: string, _rule: RangeValueRule) {
   return null;
 }
 
@@ -609,8 +591,7 @@ function formatComputedHelp(schema: { fields: string[] }, field: string) {
 
   const rangeRule = getRangeValueRule(schema, field);
   if (rangeRule) {
-    const parts = rangeRule.ranges.map((r) => `(${rangeRule.source} > ${r.gt} 且 ≤ ${r.lte}) ⇒ ${r.value}`);
-    return parts.join("；");
+    return null;
   }
 
   const sumRule = getSumMultiplyRule(schema, field);
@@ -634,6 +615,10 @@ function formatComputedHelp(schema: { fields: string[] }, field: string) {
 function applyComputedFields(schema: { fields: string[] }, data: Record<string, string>) {
   const out: Record<string, string> = { ...data };
 
+  // Apply defaults
+  if (schema.fields.includes("体积重系数") && !out["体积重系数"]) out["体积重系数"] = "6000";
+  if (schema.fields.includes("运输包装体积系数") && !out["运输包装体积系数"]) out["运输包装体积系数"] = "6000";
+
   // 包裹体积（立方厘米）= L × W × H
   if (
     schema.fields.includes("包裹体积（立方厘米）") &&
@@ -646,6 +631,21 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     const h = toFiniteNumber(out["包裹尺寸-高（厘米）"] ?? "");
     if (l != null && w != null && h != null) {
       out["包裹体积（立方厘米）"] = formatDecimal(l * w * h, 4);
+    }
+  }
+
+  // 运输包装体积 = L × W × H
+  if (
+    schema.fields.includes("运输包装体积") &&
+    schema.fields.includes("运输包装尺寸-长（厘米）") &&
+    schema.fields.includes("运输包装尺寸-宽（厘米）") &&
+    schema.fields.includes("运输包装尺寸-高（厘米）")
+  ) {
+    const l = toFiniteNumber(out["运输包装尺寸-长（厘米）"] ?? "");
+    const w = toFiniteNumber(out["运输包装尺寸-宽（厘米）"] ?? "");
+    const h = toFiniteNumber(out["运输包装尺寸-高（厘米）"] ?? "");
+    if (l != null && w != null && h != null) {
+      out["运输包装体积"] = formatDecimal(l * w * h, 4);
     }
   }
 
@@ -675,12 +675,6 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     if (!schema.fields.includes(r.numerator)) continue;
     if (!schema.fields.includes(r.denominator)) continue;
     out[r.target] = divideValue(out, r) ?? "";
-  }
-
-  for (const r of RANGE_VALUE_RULES) {
-    if (!schema.fields.includes(r.target)) continue;
-    if (!schema.fields.includes(r.source)) continue;
-    out[r.target] = mapRangeValue(out[r.source] ?? "", r) ?? "";
   }
 
   for (const r of COPY_VALUE_RULES) {
@@ -7893,7 +7887,7 @@ export function WorkspaceClient({
                       ? multiplyAndCeil(editing.data[multRule.source] ?? "", multRule.factor, multRule.step)
                       : null;
                     const computedDivide = divideRule ? divideValue(editing.data, divideRule) : null;
-                    const computedRange = rangeRule ? mapRangeValue(editing.data[rangeRule.source] ?? "", rangeRule) : null;
+                    const computedRange = null;
                     const computedSum = sumRule ? sumMultiplyValue(editing.data, sumRule) : null;
                     const computedCopy = copyRule ? copyValue(editing.data, copyRule) : null;
                     const computedSumConst = sumConstRule ? sumMultiplyConstValue(editing.data, sumConstRule) : null;

@@ -131,9 +131,6 @@ export async function PATCH(
       if (inquirySchema) {
         const stringified: Record<string, string> = {};
         for (const [k, v] of Object.entries(normalized)) stringified[k] = String(v ?? "");
-        // Apply defaults for fields that have them
-        if (!stringified["体积重系数"]) stringified["体积重系数"] = "6000";
-        if (!stringified["运输包装体积系数"]) stringified["运输包装体积系数"] = "6000";
         const computed = applyComputedFields(inquirySchema, stringified);
         for (const [k, v] of Object.entries(computed)) normalized[k] = v;
       }
