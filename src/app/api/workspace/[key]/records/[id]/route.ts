@@ -8,6 +8,7 @@ import { getPool } from "@/lib/db/pool";
 import { MENU_GROUPS } from "@/lib/menu/config";
 import { logOperation } from "@/lib/audit/log";
 import { getWorkspaceSchema } from "@/lib/workspace/schemas";
+import { applyComputedFields } from "@/lib/workspace/compute";
 
 export const runtime = "nodejs";
 
@@ -124,6 +125,17 @@ export async function PATCH(
         if (!assignee || !currentUsername || assignee !== currentUsername) {
           return NextResponse.json({ error: "无权限：仅被分配的询价人可修改此记录" }, { status: 403 });
         }
+      }
+      // Run server-side computation after full data merge
+      const inquirySchema = getWorkspaceSchema("ops.selection");
+      if (inquirySchema) {
+        const stringified: Record<string, string> = {};
+        for (const [k, v] of Object.entries(normalized)) stringified[k] = String(v ?? "");
+        // Apply defaults for fields that have them
+        if (!stringified["体积重系数"]) stringified["体积重系数"] = "6000";
+        if (!stringified["运输包装体积系数"]) stringified["运输包装体积系数"] = "6000";
+        const computed = applyComputedFields(inquirySchema, stringified);
+        for (const [k, v] of Object.entries(computed)) normalized[k] = v;
       }
     }
   }

@@ -634,6 +634,21 @@ function formatComputedHelp(schema: { fields: string[] }, field: string) {
 function applyComputedFields(schema: { fields: string[] }, data: Record<string, string>) {
   const out: Record<string, string> = { ...data };
 
+  // 包裹体积（立方厘米）= L × W × H
+  if (
+    schema.fields.includes("包裹体积（立方厘米）") &&
+    schema.fields.includes("包裹尺寸-长（厘米）") &&
+    schema.fields.includes("包裹尺寸-宽（厘米）") &&
+    schema.fields.includes("包裹尺寸-高（厘米）")
+  ) {
+    const l = toFiniteNumber(out["包裹尺寸-长（厘米）"] ?? "");
+    const w = toFiniteNumber(out["包裹尺寸-宽（厘米）"] ?? "");
+    const h = toFiniteNumber(out["包裹尺寸-高（厘米）"] ?? "");
+    if (l != null && w != null && h != null) {
+      out["包裹体积（立方厘米）"] = formatDecimal(l * w * h, 4);
+    }
+  }
+
   for (const f of schema.fields) {
     const source = getCmSourceForInchField(schema, f);
     if (!source) continue;
