@@ -1335,7 +1335,19 @@ export function WorkspaceClient({
   const inquiryComputedPreview = useMemo(() => {
     if (!schema || workspaceKey !== "ops.inquiry") return [] as Array<{ field: string; value: string }>;
 
+    // Keep existing row data as seed when editing, then override with current form values.
+    // This preserves non-form fields (e.g. cost inputs) for computed preview.
+    const seedData: Record<string, string> = {};
+    if (inquiryEditingId != null) {
+      const editingRow = records.find((r) => r.id === inquiryEditingId);
+      if (editingRow) {
+        const obj = toRecordStringUnknown(editingRow.data);
+        for (const [k, v] of Object.entries(obj)) seedData[k] = String(v ?? "");
+      }
+    }
+
     const data: Record<string, unknown> = {
+      ...seedData,
       名称: inquiryForm.productName,
       产品图片: inquiryForm.productImages,
       参考链接: inquiryForm.referenceLinks,
@@ -1370,6 +1382,13 @@ export function WorkspaceClient({
       "包裹尺寸-长（英寸）",
       "包裹尺寸-宽（英寸）",
       "包裹尺寸-高（英寸）",
+      "尾程成本（人民币）",
+      "成本总计",
+      "负向成本",
+      "人民币报价",
+      "temu核价最低标准（未加2.99）",
+      "temu报价",
+      "temu售价",
     ];
 
     const out: Array<{ field: string; value: string }> = [];
@@ -1381,6 +1400,7 @@ export function WorkspaceClient({
     return out;
   }, [
     inquiryEditingStatus,
+    inquiryEditingId,
     inquiryForm.category,
     inquiryForm.deliveryCycle,
     inquiryForm.discountNote,
@@ -1399,6 +1419,7 @@ export function WorkspaceClient({
     inquiryForm.productUnitPrice,
     inquiryForm.referenceLinks,
     operatorName,
+    records,
     schema,
     workspaceKey,
   ]);
