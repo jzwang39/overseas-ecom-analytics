@@ -229,7 +229,7 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
   "联系人电话",
   "海外仓（卸货费）",
   "海外仓（操作费）",
-  "派送费（需要测试？）",
+  "派送费",
   "美元汇率",
   "尾程成本（人民币）",
   "头程单价（人民币）？",
@@ -281,7 +281,7 @@ const INQUIRY_UI_HIDDEN_FIELDS = new Set([
   "放弃理由",
   "海外仓（卸货费）",
   "海外仓（操作费）",
-  "派送费（需要测试？）",
+  "派送费",
   "美元汇率",
   "尾程成本（人民币）",
   "头程单价（人民币）？",
@@ -583,7 +583,7 @@ function sumMultiplyConstValue(data: Record<string, string>, rule: SumMultiplyCo
 const SUM_MULTIPLY_RULES = [
   {
     target: "尾程成本（人民币）",
-    addends: ["海外仓（卸货费）", "海外仓（操作费）", "派送费（需要测试？）"],
+    addends: ["海外仓（卸货费）", "海外仓（操作费）", "派送费"],
     factor: "美元汇率",
     digits: 4,
   },
@@ -709,16 +709,16 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     out[r.target] = computed ?? "";
   }
 
-  // Auto-compute 派送费（需要测试？）from last-mile pricing table
+  // Auto-compute 派送费from last-mile pricing table
   if (
     pricingTable.length > 0 &&
-    schema.fields.includes("派送费（需要测试？）") &&
+    schema.fields.includes("派送费") &&
     schema.fields.includes("包裹计费重")
   ) {
     const billedKg = toFiniteNumber(out["包裹计费重"] ?? "");
     if (billedKg != null && billedKg > 0) {
       const feeUsd = lookupDispatchFeeUsd(pricingTable, billedKg);
-      if (feeUsd != null) out["派送费（需要测试？）"] = formatDecimal(feeUsd, 4);
+      if (feeUsd != null) out["派送费"] = formatDecimal(feeUsd, 4);
     }
   }
 
@@ -1468,7 +1468,7 @@ export function WorkspaceClient({
       "单套尺寸-长（英寸）",
       "单套尺寸-宽（英寸）",
       "单套尺寸-高（英寸）",
-      "派送费（需要测试？）",
+      "派送费",
       "尾程成本（人民币）",
       "采购成本",
       "成本总计",
