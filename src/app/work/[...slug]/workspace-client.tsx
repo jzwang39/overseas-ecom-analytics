@@ -210,14 +210,14 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
   "单套尺寸-高（英寸）",
   "包裹实物包装图",
   "箱规",
-  "运输包装尺寸-长（厘米）",
-  "运输包装尺寸-宽（厘米）",
-  "运输包装尺寸-高（厘米）",
-  "运输包装体积",
-  "运输包装体积系数",
-  "运输包装体积重",
-  "运输包装实重",
-  "运输包装计费重",
+  "外箱尺寸-长（厘米）",
+  "外箱尺寸-宽（厘米）",
+  "外箱尺寸-高（厘米）",
+  "外箱体积",
+  "外箱体积系数",
+  "外箱体积重",
+  "外箱实重",
+  "外箱计费重",
   "产品单价",
   "起订量",
   "优惠政策",
@@ -333,7 +333,7 @@ function getFieldKind(field: string): FieldKind {
 function getDefaultFieldValue(field: string) {
   const kind = getFieldKind(field);
   if (kind === "yesno") return "否";
-  if (field === "体积重系数" || field === "运输包装体积系数") return "6000";
+  if (field === "体积重系数" || field === "外箱体积系数") return "6000";
   if (field === "海外仓（操作费）") return "7.25";
   if (field === "产品规格输入方式") return "分开输入";
   return "";
@@ -392,7 +392,7 @@ function lbToKgValue(lbRaw: string) {
 
 const MAX_COMPUTED_RULES = [
   { target: "包裹计费重", a: "体积重", b: "包裹实重（公斤）" },
-  { target: "运输包装计费重", a: "运输包装体积重", b: "运输包装实重" },
+  { target: "外箱计费重", a: "外箱体积重", b: "外箱实重" },
 ] as const;
 
 type MaxComputedRule = (typeof MAX_COMPUTED_RULES)[number];
@@ -448,7 +448,7 @@ function multiplyAndCeil(raw: string, factor: number, step: number) {
 
 const DIVIDE_RULES = [
   { target: "体积重", numerator: "包裹体积（立方厘米）", denominator: "体积重系数", digits: 4 },
-  { target: "运输包装体积重", numerator: "运输包装体积", denominator: "运输包装体积系数", digits: 4 },
+  { target: "外箱体积重", numerator: "外箱体积", denominator: "外箱体积系数", digits: 4 },
 ] as const;
 
 type DivideRule = (typeof DIVIDE_RULES)[number];
@@ -661,7 +661,7 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
 
   // Apply defaults
   if (schema.fields.includes("体积重系数") && !out["体积重系数"]) out["体积重系数"] = "6000";
-  if (schema.fields.includes("运输包装体积系数") && !out["运输包装体积系数"]) out["运输包装体积系数"] = "6000";
+  if (schema.fields.includes("外箱体积系数") && !out["外箱体积系数"]) out["外箱体积系数"] = "6000";
   if (schema.fields.includes("海外仓（操作费）") && !out["海外仓（操作费）"]) out["海外仓（操作费）"] = "7.25";
 
   // 包裹体积（立方厘米）= L × W × H
@@ -679,18 +679,18 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     }
   }
 
-  // 运输包装体积 = L × W × H
+  // 外箱体积 = L × W × H
   if (
-    schema.fields.includes("运输包装体积") &&
-    schema.fields.includes("运输包装尺寸-长（厘米）") &&
-    schema.fields.includes("运输包装尺寸-宽（厘米）") &&
-    schema.fields.includes("运输包装尺寸-高（厘米）")
+    schema.fields.includes("外箱体积") &&
+    schema.fields.includes("外箱尺寸-长（厘米）") &&
+    schema.fields.includes("外箱尺寸-宽（厘米）") &&
+    schema.fields.includes("外箱尺寸-高（厘米）")
   ) {
-    const l = toFiniteNumber(out["运输包装尺寸-长（厘米）"] ?? "");
-    const w = toFiniteNumber(out["运输包装尺寸-宽（厘米）"] ?? "");
-    const h = toFiniteNumber(out["运输包装尺寸-高（厘米）"] ?? "");
+    const l = toFiniteNumber(out["外箱尺寸-长（厘米）"] ?? "");
+    const w = toFiniteNumber(out["外箱尺寸-宽（厘米）"] ?? "");
+    const h = toFiniteNumber(out["外箱尺寸-高（厘米）"] ?? "");
     if (l != null && w != null && h != null) {
-      out["运输包装体积"] = formatDecimal(l * w * h, 4);
+      out["外箱体积"] = formatDecimal(l * w * h, 4);
     }
   }
 
@@ -3421,14 +3421,14 @@ export function WorkspaceClient({
       "单套尺寸-高（英寸）",
       "包裹实物包装图",
       "箱规",
-      "运输包装尺寸-长（厘米）",
-      "运输包装尺寸-宽（厘米）",
-      "运输包装尺寸-高（厘米）",
-      "运输包装体积",
-      "运输包装体积系数",
-      "运输包装体积重",
-      "运输包装实重",
-      "运输包装计费重",
+      "外箱尺寸-长（厘米）",
+      "外箱尺寸-宽（厘米）",
+      "外箱尺寸-高（厘米）",
+      "外箱体积",
+      "外箱体积系数",
+      "外箱体积重",
+      "外箱实重",
+      "外箱计费重",
     ]);
     return tableFields.filter((f) => !excluded.has(f));
   }, [tableFields, workspaceKey]);
@@ -5146,10 +5146,10 @@ export function WorkspaceClient({
                           const usEastWarehouse = String(obj["美东仓"] ?? "").trim();
                           const szWarehouse = String(obj["深圳仓"] ?? "").trim();
 
-                          const actualPackL = String(obj["运输包装尺寸-长（厘米）"] ?? "").trim();
-                          const actualPackW = String(obj["运输包装尺寸-宽（厘米）"] ?? "").trim();
-                          const actualPackH = String(obj["运输包装尺寸-高（厘米）"] ?? "").trim();
-                          const actualPackWeight = String(obj["运输包装实重"] ?? "").trim();
+                          const actualPackL = String(obj["外箱尺寸-长（厘米）"] ?? "").trim();
+                          const actualPackW = String(obj["外箱尺寸-宽（厘米）"] ?? "").trim();
+                          const actualPackH = String(obj["外箱尺寸-高（厘米）"] ?? "").trim();
+                          const actualPackWeight = String(obj["外箱实重"] ?? "").trim();
                           const actualPackSize =
                             actualPackL || actualPackW || actualPackH
                               ? `${actualPackL || "—"}x${actualPackW || "—"}x${actualPackH || "—"}cm`
@@ -10031,17 +10031,17 @@ export function WorkspaceClient({
                           "实际单套属性",
                           null,
                           <div className="flex flex-col gap-4">
-                            {schema.fields.includes("运输包装尺寸-长（厘米）") &&
-                            schema.fields.includes("运输包装尺寸-宽（厘米）") &&
-                            schema.fields.includes("运输包装尺寸-高（厘米）") ? (
+                            {schema.fields.includes("外箱尺寸-长（厘米）") &&
+                            schema.fields.includes("外箱尺寸-宽（厘米）") &&
+                            schema.fields.includes("外箱尺寸-高（厘米）") ? (
                               <div className="flex flex-col gap-2">
                                 <div className="text-xs text-muted">实际单套尺寸（长 / 宽 / 高，cm）</div>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                                   <input
                                     type="number"
                                     inputMode="decimal"
-                                    value={String(editing.data["运输包装尺寸-长（厘米）"] ?? "")}
-                                    onChange={(e) => setFieldValue("运输包装尺寸-长（厘米）", sanitizeDecimalInput(e.target.value))}
+                                    value={String(editing.data["外箱尺寸-长（厘米）"] ?? "")}
+                                    onChange={(e) => setFieldValue("外箱尺寸-长（厘米）", sanitizeDecimalInput(e.target.value))}
                                     onKeyDown={(e) => {
                                       if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
                                     }}
@@ -10054,8 +10054,8 @@ export function WorkspaceClient({
                                   <input
                                     type="number"
                                     inputMode="decimal"
-                                    value={String(editing.data["运输包装尺寸-宽（厘米）"] ?? "")}
-                                    onChange={(e) => setFieldValue("运输包装尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value))}
+                                    value={String(editing.data["外箱尺寸-宽（厘米）"] ?? "")}
+                                    onChange={(e) => setFieldValue("外箱尺寸-宽（厘米）", sanitizeDecimalInput(e.target.value))}
                                     onKeyDown={(e) => {
                                       if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
                                     }}
@@ -10068,8 +10068,8 @@ export function WorkspaceClient({
                                   <input
                                     type="number"
                                     inputMode="decimal"
-                                    value={String(editing.data["运输包装尺寸-高（厘米）"] ?? "")}
-                                    onChange={(e) => setFieldValue("运输包装尺寸-高（厘米）", sanitizeDecimalInput(e.target.value))}
+                                    value={String(editing.data["外箱尺寸-高（厘米）"] ?? "")}
+                                    onChange={(e) => setFieldValue("外箱尺寸-高（厘米）", sanitizeDecimalInput(e.target.value))}
                                     onKeyDown={(e) => {
                                       if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
                                     }}
@@ -10083,14 +10083,14 @@ export function WorkspaceClient({
                               </div>
                             ) : null}
 
-                            {schema.fields.includes("运输包装实重") ? (
+                            {schema.fields.includes("外箱实重") ? (
                               <div className="flex flex-col gap-2">
                                 <div className="text-xs text-muted">实际包裹重量（kg）</div>
                                 <input
                                   type="number"
                                   inputMode="decimal"
-                                  value={String(editing.data["运输包装实重"] ?? "")}
-                                  onChange={(e) => setFieldValue("运输包装实重", sanitizeDecimalInput(e.target.value))}
+                                  value={String(editing.data["外箱实重"] ?? "")}
+                                  onChange={(e) => setFieldValue("外箱实重", sanitizeDecimalInput(e.target.value))}
                                   onKeyDown={(e) => {
                                     if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
                                   }}
