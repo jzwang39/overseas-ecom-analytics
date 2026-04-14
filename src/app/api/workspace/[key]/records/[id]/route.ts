@@ -8,7 +8,7 @@ import { getPool } from "@/lib/db/pool";
 import { MENU_GROUPS } from "@/lib/menu/config";
 import { logOperation } from "@/lib/audit/log";
 import { getWorkspaceSchema } from "@/lib/workspace/schemas";
-import { applyComputedFields } from "@/lib/workspace/compute";
+import { applyComputedFields, type PricingEntry } from "@/lib/workspace/compute";
 
 export const runtime = "nodejs";
 
@@ -133,9 +133,25 @@ export async function PATCH(
       const computeSchemaKey = key === "ops.inquiry" ? "ops.selection" : "ops.purchase";
       const computeSchema = getWorkspaceSchema(computeSchemaKey);
       if (computeSchema) {
+        // Fetch last-mile pricing table for dispatch fee auto-computation
+        let pricingTable: PricingEntry[] = [];
+        try {
+          const [pricingRows] = await pool.query<
+            (RowDataPacket & { weight_lbs: string | null; price: string })[]
+          >(
+            "SELECT weight_lbs, price FROM last_mile_pricing WHERE deleted_at IS NULL ORDER BY sort_order ASC LIMIT 2000",
+          );
+          pricingTable = pricingRows.map((r) => ({
+            weight_lbs: r.weight_lbs != null ? Number(r.weight_lbs) : null,
+            price: Number(r.price),
+          }));
+        } catch {
+          // Table may not exist yet; skip auto-computation of dispatch fee
+        }
+
         const stringified: Record<string, string> = {};
         for (const [k, v] of Object.entries(normalized)) stringified[k] = String(v ?? "");
-        const computed = applyComputedFields(computeSchema, stringified);
+        const computed = applyComputedFields(computeSchema, stringified, pricingTable);
         for (const [k, v] of Object.entries(computed)) normalized[k] = v;
       }
     }

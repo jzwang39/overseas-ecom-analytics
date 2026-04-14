@@ -1,6 +1,29 @@
 const CM_TO_IN = 0.3937;
 const KG_TO_LB = 2.2;
 
+/** A single row from the last_mile_pricing table used for dispatch-fee lookup. */
+export type PricingEntry = { weight_lbs: number | null; price: number };
+
+/**
+ * Look up the last-mile dispatch fee (USD) for a given billed weight in kg.
+ *
+ * Conversion: 1 kg = 2.2046 lbs, rounded to 2 decimal places.
+ * Lookup key: exact decimal for < 1 lb; ceiling to nearest integer for >= 1 lb.
+ */
+export function lookupDispatchFeeUsd(
+  pricingTable: PricingEntry[],
+  billedWeightKg: number,
+): number | null {
+  if (billedWeightKg <= 0 || pricingTable.length === 0) return null;
+  const lbs = Math.round(billedWeightKg * 2.2046 * 100) / 100;
+  if (lbs <= 0) return null;
+  const lookupKey = lbs < 1 ? lbs : Math.ceil(lbs);
+  const entry = pricingTable.find(
+    (e) => e.weight_lbs != null && Math.abs(e.weight_lbs - lookupKey) < 0.005,
+  );
+  return entry != null ? entry.price : null;
+}
+
 function toFiniteNumber(raw: string): number | null {
   const s = raw.trim();
   if (!s) return null;
@@ -41,6 +64,7 @@ function ceilToMultiple(n: number, step: number): number | null {
 export function applyComputedFields(
   schema: { fields: string[] },
   data: Record<string, string>,
+  pricingTable: PricingEntry[] = [],
 ): Record<string, string> {
   const out: Record<string, string> = { ...data };
 
@@ -128,6 +152,19 @@ export function applyComputedFields(
       out[r.target] = formatDecimal(a, 4);
     } else {
       out[r.target] = formatDecimal(Math.max(a, b), 4);
+    }
+  }
+
+  // 5.5. Auto-compute 派送费（需要测试？）from last-mile pricing table
+  if (
+    pricingTable.length > 0 &&
+    schema.fields.includes("派送费（需要测试？）") &&
+    schema.fields.includes("包裹计费重")
+  ) {
+    const billedKg = toFiniteNumber(out["包裹计费重"] ?? "");
+    if (billedKg != null && billedKg > 0) {
+      const feeUsd = lookupDispatchFeeUsd(pricingTable, billedKg);
+      if (feeUsd != null) out["派送费（需要测试？）"] = formatDecimal(feeUsd, 4);
     }
   }
 

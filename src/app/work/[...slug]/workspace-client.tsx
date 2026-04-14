@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Users, Clock, XCircle, Search, RotateCcw, Check, X, ExternalLink, Plus, Trash2, Paperclip } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { getWorkspaceSchema } from "@/lib/workspace/schemas";
+import { type PricingEntry, lookupDispatchFeeUsd } from "@/lib/workspace/compute";
 import { useSession } from "next-auth/react";
 
 type RecordRow = { id: number; updated_at: string; data: unknown };
@@ -633,7 +634,7 @@ function formatComputedHelp(schema: { fields: string[] }, field: string) {
   return null;
 }
 
-function applyComputedFields(schema: { fields: string[] }, data: Record<string, string>) {
+function applyComputedFields(schema: { fields: string[] }, data: Record<string, string>, pricingTable: PricingEntry[] = []) {
   const out: Record<string, string> = { ...data };
 
   // Apply defaults
@@ -683,6 +684,19 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
     if (!schema.fields.includes(r.b)) continue;
     const computed = maxOfTwo(out[r.a] ?? "", out[r.b] ?? "");
     out[r.target] = computed ?? "";
+  }
+
+  // Auto-compute 派送费（需要测试？）from last-mile pricing table
+  if (
+    pricingTable.length > 0 &&
+    schema.fields.includes("派送费（需要测试？）") &&
+    schema.fields.includes("包裹计费重")
+  ) {
+    const billedKg = toFiniteNumber(out["包裹计费重"] ?? "");
+    if (billedKg != null && billedKg > 0) {
+      const feeUsd = lookupDispatchFeeUsd(pricingTable, billedKg);
+      if (feeUsd != null) out["派送费（需要测试？）"] = formatDecimal(feeUsd, 4);
+    }
   }
 
   for (const r of MULTIPLIER_CEIL_RULES) {
@@ -768,6 +782,28 @@ export function WorkspaceClient({
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [q, setQ] = useState("");
+  const [lastMilePricing, setLastMilePricing] = useState<PricingEntry[]>([]);
+
+  useEffect(() => {
+    fetch("/api/config/last-mile-pricing")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json: unknown) => {
+        if (!json || typeof json !== "object") return;
+        const rowsRaw = (json as Record<string, unknown>).rows;
+        if (!Array.isArray(rowsRaw)) return;
+        const entries: PricingEntry[] = [];
+        for (const r of rowsRaw) {
+          if (!r || typeof r !== "object") continue;
+          const row = r as Record<string, unknown>;
+          const wl = row.weight_lbs != null ? Number(row.weight_lbs) : null;
+          const p = Number(row.price);
+          if (!Number.isFinite(p)) continue;
+          entries.push({ weight_lbs: wl != null && Number.isFinite(wl) ? wl : null, price: p });
+        }
+        setLastMilePricing(entries);
+      })
+      .catch(() => {});
+  }, []);
   const canInquiryBulkAssign = useMemo(() => {
     const level = session?.user?.permissionLevel;
     if (level === "admin" || level === "super_admin") return true;
@@ -1371,7 +1407,7 @@ export function WorkspaceClient({
 
     const stringData: Record<string, string> = {};
     for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
-    const computedData = applyComputedFields(schema, stringData);
+    const computedData = applyComputedFields(schema, stringData, lastMilePricing);
 
     const previewFields = [
       "体积重系数",
@@ -1538,7 +1574,7 @@ export function WorkspaceClient({
       drafts["产品规格"] = specs.length > 0 ? specs : [""];
     }
     setLinkDraftByField(drafts);
-    setEditing({ id: null, data: applyComputedFields(schema, data) });
+    setEditing({ id: null, data: applyComputedFields(schema, data, lastMilePricing) });
   }
 
   function openCreate() {
@@ -1618,7 +1654,7 @@ export function WorkspaceClient({
 
       const stringData: Record<string, string> = {};
       for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
-      const computedData = schema ? applyComputedFields(schema, stringData) : stringData;
+      const computedData = schema ? applyComputedFields(schema, stringData, lastMilePricing) : stringData;
 
       const endpointBase = `/api/workspace/${encodeURIComponent(workspaceKey)}/records`;
       const url = inquiryEditingId != null ? `${endpointBase}/${inquiryEditingId}` : endpointBase;
@@ -2569,7 +2605,7 @@ export function WorkspaceClient({
     setLinkDraftByField(drafts);
     setEditing({
       id: row.id,
-      data: applyComputedFields(schema, data),
+      data: applyComputedFields(schema, data, lastMilePricing),
       relatedIds: relatedIds.length > 0 ? relatedIds : undefined,
       specIdMap,
       specSlotIds: specSlotIds.length > 0 ? specSlotIds : undefined,
@@ -8078,7 +8114,7 @@ export function WorkspaceClient({
                       setEditing((prev) => {
                         if (!prev) return prev;
                         const nextData: Record<string, string> = { ...prev.data, [f]: next };
-                        return { ...prev, data: applyComputedFields(schema, nextData) };
+                        return { ...prev, data: applyComputedFields(schema, nextData, lastMilePricing) };
                       });
 
                     const isMainProductImage = isPurchaseFlow && f === "产品图片";
@@ -8755,7 +8791,7 @@ export function WorkspaceClient({
                         setEditing((prev) => {
                           if (!prev) return prev;
                           const nextData: Record<string, string> = { ...prev.data, [field]: next };
-                          return { ...prev, data: applyComputedFields(schema, nextData) };
+                          return { ...prev, data: applyComputedFields(schema, nextData, lastMilePricing) };
                         });
                       const setFromDisplay = (field: string, display: string) => {
                         const raw = sanitizeDecimalInput(display);
@@ -8851,7 +8887,7 @@ export function WorkspaceClient({
                         setEditing((prev) => {
                           if (!prev) return prev;
                           const nextData: Record<string, string> = { ...prev.data, [field]: next };
-                          return { ...prev, data: applyComputedFields(schema, nextData) };
+                          return { ...prev, data: applyComputedFields(schema, nextData, lastMilePricing) };
                         });
                       const setFromDisplay = (display: string) => {
                         const v = sanitizeDecimalInput(display);
@@ -8944,7 +8980,7 @@ export function WorkspaceClient({
                     const setFieldValue = (field: string, next: string) =>
                       setEditing((prev) => {
                         if (!prev) return prev;
-                        return { ...prev, data: applyComputedFields(schema, { ...prev.data, [field]: next }) };
+                        return { ...prev, data: applyComputedFields(schema, { ...prev.data, [field]: next }, lastMilePricing) };
                       });
 
                     const parsePairs = (raw: string) => {
@@ -9457,7 +9493,7 @@ export function WorkspaceClient({
                     const setFieldValue = (field: string, next: string) =>
                       setEditing((prev) => {
                         if (!prev) return prev;
-                        return { ...prev, data: applyComputedFields(schema, { ...prev.data, [field]: next }) };
+                        return { ...prev, data: applyComputedFields(schema, { ...prev.data, [field]: next }, lastMilePricing) };
                       });
 
                     const renderDimRow = (label: string, a: string, b: string, c: string, readonly = false) => {
@@ -10402,7 +10438,7 @@ export function WorkspaceClient({
                                   "产品尺寸-宽（厘米）": list[0]?.w ?? "",
                                   "产品尺寸-高（厘米）": list[0]?.h ?? "",
                                 };
-                                return { ...prev, data: applyComputedFields(schema, nextData) };
+                                return { ...prev, data: applyComputedFields(schema, nextData, lastMilePricing) };
                               });
                             };
                             return (
