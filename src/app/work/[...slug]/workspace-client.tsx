@@ -271,6 +271,8 @@ const INQUIRY_TABLE_HIDDEN_FIELDS = new Set([
   "产品体积",
   "产品重量",
   "产品实物图",
+  "人民币报价",
+  "temu核价最低标准（未加2.99）",
 ]);
 
 const INQUIRY_UI_HIDDEN_FIELDS = new Set([
