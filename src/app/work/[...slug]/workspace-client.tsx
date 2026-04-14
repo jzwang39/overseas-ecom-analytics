@@ -526,7 +526,7 @@ function multiplyConstValue(data: Record<string, string>, rule: MultiplyConstRul
 const DIVIDE_CONST_RULES = [
   { target: "temu核价最低标准（未加2.99）", source: "成本总计", divisor: 0.6, digits: 2 },
   { target: "temu报价", source: "temu核价最低标准（未加2.99）", divisor: 0.6, digits: 2 },
-  { target: "temu售价", source: "temu核价最低标准（未加2.99）", divisor: 0.6, digits: 4 },
+  { target: "temu售价", source: "temu核价最低标准（未加2.99）", divisor: 0.6, digits: 2 },
 ] as const;
 
 type DivideConstRule = (typeof DIVIDE_CONST_RULES)[number];
