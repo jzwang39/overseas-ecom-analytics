@@ -844,6 +844,14 @@ export function WorkspaceClient({
     },
     [session?.user?.permissionLevel, session?.user?.username],
   );
+  const canEditPricingRow = useCallback(
+    (row: RecordRow) => {
+      const obj = toRecordStringUnknown(row.data);
+      const operator = String(obj["运营人员"] ?? "").trim();
+      return operator !== "";
+    },
+    [],
+  );
   const canSeePricingBulkAssign = useMemo(() => {
     const level = session?.user?.permissionLevel;
     if (level === "admin" || level === "super_admin") return true;
@@ -1953,6 +1961,10 @@ export function WorkspaceClient({
         if (isDisabled) continue;
         if (!roleName.includes("运营")) continue;
         list.push({ username, displayName: displayName || username });
+      }
+      // Always ensure current user can assign to themselves
+      if (currentUsername && !list.some((u) => u.username === currentUsername)) {
+        list.unshift({ username: currentUsername, displayName: currentUsername });
       }
       if (list.length === 0 && currentUsername && currentRoleName.includes("运营")) {
         list.push({ username: currentUsername, displayName: currentUsername });
@@ -5875,8 +5887,17 @@ export function WorkspaceClient({
                                   type="button"
                                   className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                                   onClick={() => openEdit(row)}
-                                  disabled={workspaceKey === "ops.inquiry" && !canEditInquiryRow(row)}
-                                  title={workspaceKey === "ops.inquiry" && !canEditInquiryRow(row) ? "仅被分配的询价人可修改" : undefined}
+                                  disabled={
+                                    (workspaceKey === "ops.inquiry" && !canEditInquiryRow(row)) ||
+                                    (workspaceKey === "ops.pricing" && !canEditPricingRow(row))
+                                  }
+                                  title={
+                                    workspaceKey === "ops.inquiry" && !canEditInquiryRow(row)
+                                      ? "仅被分配的询价人可修改"
+                                      : workspaceKey === "ops.pricing" && !canEditPricingRow(row)
+                                        ? "请先分配运营者后再修改"
+                                        : undefined
+                                  }
                                 >
                                   修改
                                 </button>

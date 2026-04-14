@@ -128,6 +128,19 @@ export async function PATCH(
       }
     }
 
+    if (key === "ops.pricing") {
+      const rawData = existing[0]?.data;
+      const obj = rawData && typeof rawData === "object" && !Array.isArray(rawData)
+        ? (rawData as Record<string, unknown>)
+        : {};
+      const existingOperator = typeof obj["运营人员"] === "string" ? obj["运营人员"].trim() : "";
+      const incomingOperator = typeof normalized["运营人员"] === "string" ? String(normalized["运营人员"]).trim() : "";
+      // Block editing if the record is not yet assigned, unless this PATCH is itself the assignment action
+      if (!existingOperator && !incomingOperator) {
+        return NextResponse.json({ error: "无权限：请先分配运营者后再修改" }, { status: 403 });
+      }
+    }
+
     // Run server-side computation for all workspace keys that use PURCHASE_FIELDS
     if (key === "ops.inquiry" || key === "ops.pricing" || key === "ops.purchase") {
       const computeSchemaKey = key === "ops.inquiry" ? "ops.selection" : "ops.purchase";
