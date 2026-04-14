@@ -119,6 +119,7 @@ const INQUIRY_COST_SUMMARY_FIELDS = [
   "temu报价",
   "temu售价",
 ] as const;
+const INQUIRY_PREVIEW_TWO_DECIMAL_FIELDS = new Set(["尾程成本（人民币）", "成本总计", "负向成本", "人民币报价"]);
 
 function getPricingComputedSummary(data: Record<string, unknown>) {
   const lines: string[] = [];
@@ -138,6 +139,14 @@ function getInquiryCostSummary(data: Record<string, unknown>) {
     lines.push(`${field}: ${value}`);
   }
   return lines;
+}
+
+function formatInquiryPreviewValue(field: string, rawValue: string) {
+  if (!rawValue) return rawValue;
+  if (!INQUIRY_PREVIEW_TWO_DECIMAL_FIELDS.has(field)) return rawValue;
+  const numeric = Number(rawValue);
+  if (!Number.isFinite(numeric)) return rawValue;
+  return numeric.toFixed(2);
 }
 
 function displayFieldLabel(field: string) {
@@ -954,6 +963,7 @@ export function WorkspaceClient({
     category: string;
     productImages: string;
     referenceLinks: string;
+    productSpec: string;
     productUnitPrice: string;
     moq: string;
     discountPolicy: "" | "有" | "无";
@@ -974,6 +984,7 @@ export function WorkspaceClient({
     category: "",
     productImages: "",
     referenceLinks: "",
+    productSpec: "",
     productUnitPrice: "",
     moq: "",
     discountPolicy: "",
@@ -1186,6 +1197,7 @@ export function WorkspaceClient({
       category: "",
       productImages: "",
       referenceLinks: "",
+      productSpec: "",
       productUnitPrice: "",
       moq: "",
       discountPolicy: "",
@@ -1486,7 +1498,8 @@ export function WorkspaceClient({
     const out: Array<{ field: string; value: string }> = [];
     for (const field of previewFields) {
       if (!schema.fields.includes(field)) continue;
-      const value = String(computedData[field] ?? "").trim();
+      const rawValue = String(computedData[field] ?? "").trim();
+      const value = formatInquiryPreviewValue(field, rawValue);
       out.push({ field, value });
     }
     return out;
@@ -1653,6 +1666,7 @@ export function WorkspaceClient({
       category: "",
       productImages: "",
       referenceLinks: "",
+      productSpec: "",
       productUnitPrice: "",
       moq: "",
       discountPolicy: "",
@@ -1692,6 +1706,7 @@ export function WorkspaceClient({
         名称: inquiryForm.productName,
         产品图片: inquiryForm.productImages,
         参考链接: inquiryForm.referenceLinks,
+        产品规格: inquiryForm.productSpec,
         "单套尺寸-长（厘米）": inquiryForm.packageLengthCm,
         "单套尺寸-宽（厘米）": inquiryForm.packageWidthCm,
         "单套尺寸-高（厘米）": inquiryForm.packageHeightCm,
@@ -1704,6 +1719,7 @@ export function WorkspaceClient({
       };
       if (!String(inquiryForm.productImages ?? "").trim()) delete data["产品图片"];
       if (!String(inquiryForm.referenceLinks ?? "").trim()) delete data["参考链接"];
+      if (!String(inquiryForm.productSpec ?? "").trim()) delete data["产品规格"];
       if (category) data["所属类目"] = category;
       if (unitPrice) data["产品单价"] = unitPrice;
       if (moq) data["起订量"] = moq;
@@ -2585,6 +2601,7 @@ export function WorkspaceClient({
         category: String(obj["所属类目"] ?? ""),
         productImages: String(obj["产品图片"] ?? ""),
         referenceLinks: String(obj["参考链接"] ?? ""),
+        productSpec: String(obj["产品规格"] ?? ""),
         productUnitPrice: String(obj["产品单价"] ?? ""),
         moq: String(obj["起订量"] ?? ""),
         discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
@@ -6458,7 +6475,12 @@ export function WorkspaceClient({
 
                 <div className="rounded-lg border border-border bg-surface p-3">
                   <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm font-medium">包裹参数</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium">产品属性</div>
+                      <span className="inline-flex h-5 items-center rounded-md border border-border px-2 text-[10px] text-muted">
+                        尺寸/重量
+                      </span>
+                    </div>
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
@@ -6489,7 +6511,7 @@ export function WorkspaceClient({
 
                   <div className="mt-3 grid gap-3">
                     <div className="flex flex-col gap-1">
-                      <div className="text-xs text-muted">单套尺寸（长 / 宽 / 高，{inquiryUnits === "cmkg" ? "cm" : "in"}）</div>
+                      <div className="text-xs text-muted">产品尺寸（长 / 宽 / 高，{inquiryUnits === "cmkg" ? "cm" : "in"}）</div>
                       <div className="flex gap-2">
                         <input
                           type="number"
@@ -6594,7 +6616,7 @@ export function WorkspaceClient({
                     </div>
 
                     <div className="flex flex-col gap-1">
-                      <div className="text-xs text-muted">包裹重量（{inquiryUnits === "cmkg" ? "kg" : "lb"}）</div>
+                      <div className="text-xs text-muted">产品重量（{inquiryUnits === "cmkg" ? "kg" : "lb"}）</div>
                       <input
                         type="number"
                         inputMode="decimal"
@@ -6626,6 +6648,25 @@ export function WorkspaceClient({
                           inquiryModalFieldRefs.current["inquiry-create-package-weight"] = el;
                         }}
                         placeholder="请输入重量"
+                        className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">产品规格</div>
+                      <input
+                        value={inquiryForm.productSpec}
+                        onChange={(e) => {
+                          pendingInquiryModalFocus.current = {
+                            key: "inquiry-create-product-spec",
+                            selectionStart: e.currentTarget.selectionStart,
+                            selectionEnd: e.currentTarget.selectionEnd,
+                          };
+                          setInquiryForm((prev) => ({ ...prev, productSpec: e.target.value }));
+                        }}
+                        ref={(el) => {
+                          inquiryModalFieldRefs.current["inquiry-create-product-spec"] = el;
+                        }}
+                        placeholder="请输入产品规格"
                         className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>

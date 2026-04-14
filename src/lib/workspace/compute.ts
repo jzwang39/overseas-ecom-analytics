@@ -36,6 +36,11 @@ function formatDecimal(n: number, digits = 4): string {
   return s === "-0" ? "0" : s;
 }
 
+function formatFixedDecimal(n: number, digits = 2): string {
+  const s = n.toFixed(digits);
+  return /^-0(?:\.0+)?$/.test(s) ? `0.${"0".repeat(digits)}` : s;
+}
+
 function ceilToMultiple(n: number, step: number): number | null {
   if (!Number.isFinite(n)) return null;
   if (!Number.isFinite(step) || step <= 0) return null;
@@ -187,7 +192,8 @@ export function applyComputedFields(
       target: "尾程成本（人民币）",
       addends: ["海外仓（卸货费）", "海外仓（操作费）", "派送费"] as string[],
       factor: "美元汇率",
-      digits: 4,
+      digits: 2,
+      fixed: true,
     },
   ] as const;
   for (const r of sumMultiplyRules) {
@@ -206,13 +212,25 @@ export function applyComputedFields(
       any = true;
       sum += v;
     }
-    if (any) out[r.target] = formatDecimal(sum * factor, r.digits);
+    if (any) out[r.target] = r.fixed ? formatFixedDecimal(sum * factor, r.digits) : formatDecimal(sum * factor, r.digits);
   }
 
   // 8. SUM_MULTIPLY_CONST rules (成本总计, 负向成本)
   const sumMultiplyConstRules = [
-    { target: "成本总计", addends: ["采购成本", "头程成本", "尾程成本（人民币）"] as string[], factor: 1, digits: 4 },
-    { target: "负向成本", addends: ["头程成本", "采购成本", "尾程成本（人民币）"] as string[], factor: 0.1, digits: 4 },
+    {
+      target: "成本总计",
+      addends: ["采购成本", "头程成本", "尾程成本（人民币）"] as string[],
+      factor: 1,
+      digits: 2,
+      fixed: true,
+    },
+    {
+      target: "负向成本",
+      addends: ["头程成本", "采购成本", "尾程成本（人民币）"] as string[],
+      factor: 0.1,
+      digits: 2,
+      fixed: true,
+    },
   ] as const;
   for (const r of sumMultiplyConstRules) {
     if (!schema.fields.includes(r.target)) continue;
@@ -227,17 +245,17 @@ export function applyComputedFields(
       any = true;
       sum += v;
     }
-    if (any) out[r.target] = formatDecimal(sum * r.factor, r.digits);
+    if (any) out[r.target] = r.fixed ? formatFixedDecimal(sum * r.factor, r.digits) : formatDecimal(sum * r.factor, r.digits);
   }
 
   // 9. MULTIPLY_CONST rules (人民币报价)
-  const multiplyConstRules = [{ target: "人民币报价", source: "成本总计", factor: 1.2, digits: 4 }] as const;
+  const multiplyConstRules = [{ target: "人民币报价", source: "成本总计", factor: 1.2, digits: 2, fixed: true }] as const;
   for (const r of multiplyConstRules) {
     if (!schema.fields.includes(r.target)) continue;
     if (!schema.fields.includes(r.source)) continue;
     const v = toFiniteNumber(out[r.source] ?? "");
     if (v == null) continue;
-    out[r.target] = formatDecimal(v * r.factor, r.digits);
+    out[r.target] = r.fixed ? formatFixedDecimal(v * r.factor, r.digits) : formatDecimal(v * r.factor, r.digits);
   }
 
   // 10. DIVIDE_CONST rules (temu pricing)
