@@ -968,6 +968,7 @@ export function WorkspaceClient({
     factoryContact: string;
     factoryPhone: string;
     purchaseCost: string;
+    usdRate: string;
   }>({
     productName: "",
     category: "",
@@ -987,6 +988,7 @@ export function WorkspaceClient({
     factoryContact: "",
     factoryPhone: "",
     purchaseCost: "",
+    usdRate: "",
   });
   const [inquiryActionLoading, setInquiryActionLoading] = useState<null | "save" | "submit">(null);
   const [inquiryEditingId, setInquiryEditingId] = useState<number | null>(null);
@@ -1198,6 +1200,7 @@ export function WorkspaceClient({
       factoryContact: "",
       factoryPhone: "",
       purchaseCost: "",
+      usdRate: "",
     });
     setInquiryActionLoading(null);
     setInquiryEditingId(null);
@@ -1453,6 +1456,7 @@ export function WorkspaceClient({
     if (inquiryForm.discountPolicy === "有" && inquiryForm.discountNote.trim()) data["优惠政策备注"] = inquiryForm.discountNote.trim();
     if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
     if (inquiryForm.purchaseCost.trim()) data["采购成本"] = inquiryForm.purchaseCost.trim();
+    if (inquiryForm.usdRate.trim()) data["美元汇率"] = inquiryForm.usdRate.trim();
     if (operatorName) data["运营人员"] = operatorName;
 
     const stringData: Record<string, string> = {};
@@ -1506,6 +1510,7 @@ export function WorkspaceClient({
     inquiryForm.productName,
     inquiryForm.productUnitPrice,
     inquiryForm.purchaseCost,
+    inquiryForm.usdRate,
     inquiryForm.referenceLinks,
     operatorName,
     records,
@@ -1662,6 +1667,7 @@ export function WorkspaceClient({
       factoryContact: "",
       factoryPhone: "",
       purchaseCost: "",
+      usdRate: "",
     });
     setInquiryActionLoading(null);
     setInquiryCreateOpen(true);
@@ -1705,6 +1711,7 @@ export function WorkspaceClient({
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
       if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
       if (inquiryForm.purchaseCost.trim()) data["采购成本"] = inquiryForm.purchaseCost.trim();
+      if (inquiryForm.usdRate.trim()) data["美元汇率"] = inquiryForm.usdRate.trim();
       if (operatorName) data["运营人员"] = operatorName;
 
       const stringData: Record<string, string> = {};
@@ -2592,6 +2599,7 @@ export function WorkspaceClient({
         factoryContact: String(obj["工厂联系人"] ?? ""),
         factoryPhone: String(obj["联系人电话"] ?? ""),
         purchaseCost: String(obj["采购成本"] ?? ""),
+        usdRate: String(obj["美元汇率"] ?? ""),
       });
       setInquiryActionLoading(null);
       setInquiryCreateOpen(true);
@@ -6832,6 +6840,17 @@ export function WorkspaceClient({
                     value={inquiryForm.purchaseCost}
                     onChange={(e) => setInquiryForm((prev) => ({ ...prev, purchaseCost: e.target.value }))}
                     placeholder="请输入采购成本"
+                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                  />
+                </div>
+                <div>
+                  <div className="text-xs text-muted">美元汇率</div>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={inquiryForm.usdRate}
+                    onChange={(e) => setInquiryForm((prev) => ({ ...prev, usdRate: e.target.value }))}
+                    placeholder="请输入美元汇率"
                     className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                   />
                 </div>
