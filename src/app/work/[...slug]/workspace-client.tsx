@@ -5964,7 +5964,7 @@ export function WorkspaceClient({
       </div>
 
       {imageViewer ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-5xl rounded-xl border border-border bg-surface p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-medium">{`图片预览（${imageViewer.index + 1}/${imageViewer.urls.length}）`}</div>
