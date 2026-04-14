@@ -111,9 +111,28 @@ const PRICING_COMPUTED_SUMMARY_FIELDS = [
   "temu报价",
 ] as const;
 
+const INQUIRY_COST_SUMMARY_FIELDS = [
+  "采购成本",
+  "成本总计",
+  "人民币报价",
+  "temu核价最低标准（未加2.99）",
+  "temu报价",
+  "temu售价",
+] as const;
+
 function getPricingComputedSummary(data: Record<string, unknown>) {
   const lines: string[] = [];
   for (const field of PRICING_COMPUTED_SUMMARY_FIELDS) {
+    const value = String(data[field] ?? "").trim();
+    if (!value) continue;
+    lines.push(`${field}: ${value}`);
+  }
+  return lines;
+}
+
+function getInquiryCostSummary(data: Record<string, unknown>) {
+  const lines: string[] = [];
+  for (const field of INQUIRY_COST_SUMMARY_FIELDS) {
     const value = String(data[field] ?? "").trim();
     if (!value) continue;
     lines.push(`${field}: ${value}`);
@@ -5648,6 +5667,9 @@ export function WorkspaceClient({
                       {workspaceKey === "ops.pricing" ? (
                         <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">自动计算</th>
                       ) : null}
+                      {workspaceKey === "ops.inquiry" ? (
+                        <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">成本总计（RMB）</th>
+                      ) : null}
                       <th className="whitespace-nowrap border-b border-border px-3 py-2 text-right">操作</th>
                     </tr>
                   </thead>
@@ -5660,7 +5682,7 @@ export function WorkspaceClient({
                             tableFields.length +
                             1 +
                             (workspaceKey === "ops.inquiry" || workspaceKey === "ops.pricing" ? 1 : 0) +
-                            (workspaceKey === "ops.pricing" ? 1 : 0)
+                            (workspaceKey === "ops.pricing" || workspaceKey === "ops.inquiry" ? 1 : 0)
                           }
                         >
                           暂无数据
@@ -5776,6 +5798,21 @@ export function WorkspaceClient({
                               <td className="max-w-[300px] border-b border-border px-3 py-2 text-xs text-muted">
                                 {(() => {
                                   const lines = getPricingComputedSummary(obj);
+                                  if (lines.length === 0) return "—";
+                                  return (
+                                    <div className="space-y-1 whitespace-normal">
+                                      {lines.map((line) => (
+                                        <div key={line}>{line}</div>
+                                      ))}
+                                    </div>
+                                  );
+                                })()}
+                              </td>
+                            ) : null}
+                            {workspaceKey === "ops.inquiry" ? (
+                              <td className="max-w-[260px] border-b border-border px-3 py-2 text-xs text-muted">
+                                {(() => {
+                                  const lines = getInquiryCostSummary(obj);
                                   if (lines.length === 0) return "—";
                                   return (
                                     <div className="space-y-1 whitespace-normal">
