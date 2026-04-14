@@ -196,18 +196,18 @@ const PURCHASE_UI_HIDDEN_FIELDS = new Set([
   "包装尺寸-高（英寸）",
   "产品体积",
   "产品实物图",
-  "包裹尺寸-长（厘米）",
-  "包裹尺寸-宽（厘米）",
-  "包裹尺寸-高（厘米）",
+  "单套尺寸-长（厘米）",
+  "单套尺寸-宽（厘米）",
+  "单套尺寸-高（厘米）",
   "包裹体积（立方厘米）",
   "体积重系数",
   "体积重",
   "包裹实重（公斤）",
   "包裹计费重",
   "包裹计费重（磅）",
-  "包裹尺寸-长（英寸）",
-  "包裹尺寸-宽（英寸）",
-  "包裹尺寸-高（英寸）",
+  "单套尺寸-长（英寸）",
+  "单套尺寸-宽（英寸）",
+  "单套尺寸-高（英寸）",
   "包裹实物包装图",
   "箱规",
   "运输包装尺寸-长（厘米）",
@@ -667,13 +667,13 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
   // 包裹体积（立方厘米）= L × W × H
   if (
     schema.fields.includes("包裹体积（立方厘米）") &&
-    schema.fields.includes("包裹尺寸-长（厘米）") &&
-    schema.fields.includes("包裹尺寸-宽（厘米）") &&
-    schema.fields.includes("包裹尺寸-高（厘米）")
+    schema.fields.includes("单套尺寸-长（厘米）") &&
+    schema.fields.includes("单套尺寸-宽（厘米）") &&
+    schema.fields.includes("单套尺寸-高（厘米）")
   ) {
-    const l = toFiniteNumber(out["包裹尺寸-长（厘米）"] ?? "");
-    const w = toFiniteNumber(out["包裹尺寸-宽（厘米）"] ?? "");
-    const h = toFiniteNumber(out["包裹尺寸-高（厘米）"] ?? "");
+    const l = toFiniteNumber(out["单套尺寸-长（厘米）"] ?? "");
+    const w = toFiniteNumber(out["单套尺寸-宽（厘米）"] ?? "");
+    const h = toFiniteNumber(out["单套尺寸-高（厘米）"] ?? "");
     if (l != null && w != null && h != null) {
       out["包裹体积（立方厘米）"] = formatDecimal(l * w * h, 4);
     }
@@ -1421,9 +1421,9 @@ export function WorkspaceClient({
       名称: inquiryForm.productName,
       产品图片: inquiryForm.productImages,
       参考链接: inquiryForm.referenceLinks,
-      "包裹尺寸-长（厘米）": inquiryForm.packageLengthCm,
-      "包裹尺寸-宽（厘米）": inquiryForm.packageWidthCm,
-      "包裹尺寸-高（厘米）": inquiryForm.packageHeightCm,
+      "单套尺寸-长（厘米）": inquiryForm.packageLengthCm,
+      "单套尺寸-宽（厘米）": inquiryForm.packageWidthCm,
+      "单套尺寸-高（厘米）": inquiryForm.packageHeightCm,
       "包裹实重（公斤）": inquiryForm.packageWeightKg,
       主要工艺: inquiryForm.mainProcess,
       工厂所在地: inquiryForm.factoryLocation,
@@ -1450,9 +1450,9 @@ export function WorkspaceClient({
       "体积重",
       "包裹计费重",
       "包裹计费重（磅）",
-      "包裹尺寸-长（英寸）",
-      "包裹尺寸-宽（英寸）",
-      "包裹尺寸-高（英寸）",
+      "单套尺寸-长（英寸）",
+      "单套尺寸-宽（英寸）",
+      "单套尺寸-高（英寸）",
       "派送费（需要测试？）",
       "尾程成本（人民币）",
       "采购成本",
@@ -1671,9 +1671,9 @@ export function WorkspaceClient({
         名称: inquiryForm.productName,
         产品图片: inquiryForm.productImages,
         参考链接: inquiryForm.referenceLinks,
-        "包裹尺寸-长（厘米）": inquiryForm.packageLengthCm,
-        "包裹尺寸-宽（厘米）": inquiryForm.packageWidthCm,
-        "包裹尺寸-高（厘米）": inquiryForm.packageHeightCm,
+        "单套尺寸-长（厘米）": inquiryForm.packageLengthCm,
+        "单套尺寸-宽（厘米）": inquiryForm.packageWidthCm,
+        "单套尺寸-高（厘米）": inquiryForm.packageHeightCm,
         "包裹实重（公斤）": inquiryForm.packageWeightKg,
         主要工艺: inquiryForm.mainProcess,
         工厂所在地: inquiryForm.factoryLocation,
@@ -2386,9 +2386,9 @@ export function WorkspaceClient({
       moq: commonValue((o) => String(o["起订量"] ?? "")),
       discountPolicy: commonValue((o) => String(o["优惠政策"] ?? "")),
       discountNote: commonValue((o) => String(o["优惠政策备注"] ?? "")),
-      packageLengthCm: commonValue((o) => String(o["包裹尺寸-长（厘米）"] ?? "")),
-      packageWidthCm: commonValue((o) => String(o["包裹尺寸-宽（厘米）"] ?? "")),
-      packageHeightCm: commonValue((o) => String(o["包裹尺寸-高（厘米）"] ?? "")),
+      packageLengthCm: commonValue((o) => String(o["单套尺寸-长（厘米）"] ?? "")),
+      packageWidthCm: commonValue((o) => String(o["单套尺寸-宽（厘米）"] ?? "")),
+      packageHeightCm: commonValue((o) => String(o["单套尺寸-高（厘米）"] ?? "")),
       packageWeightKg: commonValue((o) => String(o["包裹实重（公斤）"] ?? "")),
       mainProcess: commonValue((o) => String(o["主要工艺"] ?? "")),
       factoryLocation: commonValue((o) => String(o["工厂所在地"] ?? "")),
@@ -2480,9 +2480,9 @@ export function WorkspaceClient({
 
         if (unitPrice) nextData["产品单价"] = unitPrice;
         if (moq) nextData["起订量"] = moq;
-        if (packageLengthCm) nextData["包裹尺寸-长（厘米）"] = packageLengthCm;
-        if (packageWidthCm) nextData["包裹尺寸-宽（厘米）"] = packageWidthCm;
-        if (packageHeightCm) nextData["包裹尺寸-高（厘米）"] = packageHeightCm;
+        if (packageLengthCm) nextData["单套尺寸-长（厘米）"] = packageLengthCm;
+        if (packageWidthCm) nextData["单套尺寸-宽（厘米）"] = packageWidthCm;
+        if (packageHeightCm) nextData["单套尺寸-高（厘米）"] = packageHeightCm;
         if (packageWeightKg) nextData["包裹实重（公斤）"] = packageWeightKg;
         if (mainProcess) nextData["主要工艺"] = mainProcess;
         if (factoryLocation) nextData["工厂所在地"] = factoryLocation;
@@ -2568,9 +2568,9 @@ export function WorkspaceClient({
         discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
         discountNote: String(obj["优惠政策备注"] ?? ""),
         deliveryCycle: String(obj["交货周期"] ?? ""),
-        packageLengthCm: String(obj["包裹尺寸-长（厘米）"] ?? ""),
-        packageWidthCm: String(obj["包裹尺寸-宽（厘米）"] ?? ""),
-        packageHeightCm: String(obj["包裹尺寸-高（厘米）"] ?? ""),
+        packageLengthCm: String(obj["单套尺寸-长（厘米）"] ?? ""),
+        packageWidthCm: String(obj["单套尺寸-宽（厘米）"] ?? ""),
+        packageHeightCm: String(obj["单套尺寸-高（厘米）"] ?? ""),
         packageWeightKg: String(obj["包裹实重（公斤）"] ?? ""),
         mainProcess: String(obj["主要工艺"] ?? ""),
         factoryLocation: String(obj["工厂所在地"] ?? ""),
@@ -3407,18 +3407,18 @@ export function WorkspaceClient({
       "产品尺寸-宽（厘米）",
       "产品尺寸-高（厘米）",
       "产品重量",
-      "包裹尺寸-长（厘米）",
-      "包裹尺寸-宽（厘米）",
-      "包裹尺寸-高（厘米）",
+      "单套尺寸-长（厘米）",
+      "单套尺寸-宽（厘米）",
+      "单套尺寸-高（厘米）",
       "包裹实重（公斤）",
       "包裹体积（立方厘米）",
       "体积重系数",
       "体积重",
       "包裹计费重",
       "包裹计费重（磅）",
-      "包裹尺寸-长（英寸）",
-      "包裹尺寸-宽（英寸）",
-      "包裹尺寸-高（英寸）",
+      "单套尺寸-长（英寸）",
+      "单套尺寸-宽（英寸）",
+      "单套尺寸-高（英寸）",
       "包裹实物包装图",
       "箱规",
       "运输包装尺寸-长（厘米）",
@@ -4489,7 +4489,7 @@ export function WorkspaceClient({
                           <span className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted">CM/KG</span>
                         </th>
                         <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
-                          <span>包裹属性</span>
+                          <span>单套属性</span>
                           <span className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted">CM/KG</span>
                         </th>
                         {inquiryTableExtraFields.map((f) => (
@@ -4523,9 +4523,9 @@ export function WorkspaceClient({
                           const pH = String(obj["产品尺寸-高（厘米）"] ?? "").trim();
                           const pWeight = String(obj["产品重量"] ?? "").trim();
                           const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm` : "—";
-                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
-                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
-                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packL = String(obj["单套尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["单套尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["单套尺寸-高（厘米）"] ?? "").trim();
                           const packWeight = String(obj["包裹实重（公斤）"] ?? "").trim();
                           const packSize =
                             packL || packW || packH ? `${packL || "—"}x${packW || "—"}x${packH || "—"}cm` : "—";
@@ -4757,7 +4757,7 @@ export function WorkspaceClient({
                           </button>
                         </th>
                         <th className="whitespace-nowrap border-b border-border px-3 py-2 text-left">
-                          <span>包裹属性</span>
+                          <span>单套属性</span>
                           <button
                             type="button"
                             className="ml-2 rounded-md bg-surface px-2 py-0.5 text-[10px] text-muted hover:bg-surface-2"
@@ -4806,9 +4806,9 @@ export function WorkspaceClient({
                                 : `${cmToInchesValue(pL) ?? "—"}x${cmToInchesValue(pW) ?? "—"}x${cmToInchesValue(pH) ?? "—"}in`
                               : "—";
 
-                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
-                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
-                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packL = String(obj["单套尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["单套尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["单套尺寸-高（厘米）"] ?? "").trim();
                           const packWeight = String(obj["包裹计费重"] ?? "").trim() || String(obj["包裹实重（公斤）"] ?? "").trim();
                           const packSize =
                             packL || packW || packH
@@ -5093,9 +5093,9 @@ export function WorkspaceClient({
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">基本信息</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">SKU信息</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">产品属性</th>
-                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">包裹属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">单套属性</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">发货信息</th>
-                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">实际包裹属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">实际单套属性</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">下单数</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">订单总额</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">采购成本</th>
@@ -5135,9 +5135,9 @@ export function WorkspaceClient({
                           const productSpec = String(obj["产品规格"] ?? "").trim();
                           const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"}cm` : "—";
 
-                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
-                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
-                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packL = String(obj["单套尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["单套尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["单套尺寸-高（厘米）"] ?? "").trim();
                           const packWeight = String(obj["包裹计费重"] ?? "").trim() || String(obj["包裹实重（公斤）"] ?? "").trim();
                           const packSize = packL || packW || packH ? `${packL || "—"}x${packW || "—"}x${packH || "—"}cm` : "—";
 
@@ -5369,7 +5369,7 @@ export function WorkspaceClient({
                       <tr className="bg-surface-2 text-xs text-muted">
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">商品基本信息</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">产品属性</th>
-                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">包裹属性</th>
+                        <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">单套属性</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">成本总计（RMB）</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">TEUM供货价</th>
                         <th className="whitespace-nowrap border-b border-border px-4 py-3 text-left">参考销售售价</th>
@@ -5409,9 +5409,9 @@ export function WorkspaceClient({
                           const productSpec = String(obj["产品规格"] ?? "").trim();
                           const productSize = pL || pW || pH ? `${pL || "—"}x${pW || "—"}x${pH || "—"} cm` : "—";
 
-                          const packL = String(obj["包裹尺寸-长（厘米）"] ?? "").trim();
-                          const packW = String(obj["包裹尺寸-宽（厘米）"] ?? "").trim();
-                          const packH = String(obj["包裹尺寸-高（厘米）"] ?? "").trim();
+                          const packL = String(obj["单套尺寸-长（厘米）"] ?? "").trim();
+                          const packW = String(obj["单套尺寸-宽（厘米）"] ?? "").trim();
+                          const packH = String(obj["单套尺寸-高（厘米）"] ?? "").trim();
                           const packWeight = String(obj["包裹计费重"] ?? "").trim() || String(obj["包裹实重（公斤）"] ?? "").trim();
                           const packSize = packL || packW || packH ? `${packL || "—"}x${packW || "—"}x${packH || "—"} cm` : "—";
 
@@ -6207,7 +6207,7 @@ export function WorkspaceClient({
 
                   <div className="mt-3 grid gap-3">
                     <div className="flex flex-col gap-1">
-                      <div className="text-xs text-muted">包裹尺寸（长 / 宽 / 高，{inquiryUnits === "cmkg" ? "cm" : "in"}）</div>
+                      <div className="text-xs text-muted">单套尺寸（长 / 宽 / 高，{inquiryUnits === "cmkg" ? "cm" : "in"}）</div>
                       <div className="flex gap-2">
                         <input
                           type="number"
@@ -6695,7 +6695,7 @@ export function WorkspaceClient({
 
                 <div className="mt-3 grid gap-3">
                   <div className="flex flex-col gap-1">
-                    <div className="text-xs text-muted">包裹尺寸（长 / 宽 / 高，{inquiryAssignUnits === "cmkg" ? "cm" : "in"}）</div>
+                    <div className="text-xs text-muted">单套尺寸（长 / 宽 / 高，{inquiryAssignUnits === "cmkg" ? "cm" : "in"}）</div>
                     <div className="flex gap-2">
                       <input
                         inputMode="decimal"
@@ -7698,7 +7698,7 @@ export function WorkspaceClient({
 
                 <div className="mt-3 grid gap-3">
                   <div className="flex flex-col gap-1">
-                    <div className="text-xs text-muted">包裹尺寸（长 / 宽 / 高，{inquiryBulkEditUnits === "cmkg" ? "cm" : "in"}）</div>
+                    <div className="text-xs text-muted">单套尺寸（长 / 宽 / 高，{inquiryBulkEditUnits === "cmkg" ? "cm" : "in"}）</div>
                     <div className="flex gap-2">
                       <input
                         inputMode="decimal"
@@ -9224,10 +9224,10 @@ export function WorkspaceClient({
                         )}
 
                         {renderCard(
-                          "包裹属性",
+                          "单套属性",
                           unitToggle,
                           <div className="flex flex-col gap-3">
-                            {renderDimRow("包裹尺寸", "包裹尺寸-长（厘米）", "包裹尺寸-宽（厘米）", "包裹尺寸-高（厘米）", true)}
+                            {renderDimRow("单套尺寸", "单套尺寸-长（厘米）", "单套尺寸-宽（厘米）", "单套尺寸-高（厘米）", true)}
                             {renderWeightRow("包裹重量", "包裹实重（公斤）", true)}
                           </div>,
                         )}
@@ -9962,10 +9962,10 @@ export function WorkspaceClient({
                         )}
 
                         {renderCard(
-                          "包裹属性",
+                          "单套属性",
                           unitToggle,
                           <div className="flex flex-col gap-3">
-                            {renderDimRow("包裹尺寸", "包裹尺寸-长（厘米）", "包裹尺寸-宽（厘米）", "包裹尺寸-高（厘米）", true)}
+                            {renderDimRow("单套尺寸", "单套尺寸-长（厘米）", "单套尺寸-宽（厘米）", "单套尺寸-高（厘米）", true)}
                             {renderWeightRow("包裹重量", "包裹实重（公斤）", true)}
                             {schema.fields.includes("包裹计费重") ? (
                               <div className="flex flex-col gap-1">
@@ -10028,14 +10028,14 @@ export function WorkspaceClient({
                         )}
 
                         {renderCard(
-                          "实际包裹属性",
+                          "实际单套属性",
                           null,
                           <div className="flex flex-col gap-4">
                             {schema.fields.includes("运输包装尺寸-长（厘米）") &&
                             schema.fields.includes("运输包装尺寸-宽（厘米）") &&
                             schema.fields.includes("运输包装尺寸-高（厘米）") ? (
                               <div className="flex flex-col gap-2">
-                                <div className="text-xs text-muted">实际包裹尺寸（长 / 宽 / 高，cm）</div>
+                                <div className="text-xs text-muted">实际单套尺寸（长 / 宽 / 高，cm）</div>
                                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                                   <input
                                     type="number"

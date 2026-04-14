@@ -46,7 +46,7 @@ function ceilToMultiple(n: number, step: number): number | null {
  * Apply all computed fields to a flat string record.
  *
  * Rules applied (in order):
- * 1. 包裹体积（立方厘米）= 包裹尺寸-长 × 宽 × 高
+ * 1. 包裹体积（立方厘米）= 单套尺寸-长 × 宽 × 高
  * 2. 运输包装体积 = 运输包装尺寸-长 × 宽 × 高
  * 3. cm → inch conversions for matching field pairs
  * 4. DIVIDE rules (体积重, 运输包装体积重)
@@ -76,13 +76,13 @@ export function applyComputedFields(
   // 1. 包裹体积（立方厘米）= L × W × H
   if (
     schema.fields.includes("包裹体积（立方厘米）") &&
-    schema.fields.includes("包裹尺寸-长（厘米）") &&
-    schema.fields.includes("包裹尺寸-宽（厘米）") &&
-    schema.fields.includes("包裹尺寸-高（厘米）")
+    schema.fields.includes("单套尺寸-长（厘米）") &&
+    schema.fields.includes("单套尺寸-宽（厘米）") &&
+    schema.fields.includes("单套尺寸-高（厘米）")
   ) {
-    const l = toFiniteNumber(out["包裹尺寸-长（厘米）"] ?? "");
-    const w = toFiniteNumber(out["包裹尺寸-宽（厘米）"] ?? "");
-    const h = toFiniteNumber(out["包裹尺寸-高（厘米）"] ?? "");
+    const l = toFiniteNumber(out["单套尺寸-长（厘米）"] ?? "");
+    const w = toFiniteNumber(out["单套尺寸-宽（厘米）"] ?? "");
+    const h = toFiniteNumber(out["单套尺寸-高（厘米）"] ?? "");
     if (l != null && w != null && h != null) {
       out["包裹体积（立方厘米）"] = formatDecimal(l * w * h, 4);
     }
@@ -105,9 +105,9 @@ export function applyComputedFields(
 
   // 3. cm → inch conversions
   const cmToInMap: Array<{ cm: string; inch: string }> = [
-    { cm: "包裹尺寸-长（厘米）", inch: "包裹尺寸-长（英寸）" },
-    { cm: "包裹尺寸-宽（厘米）", inch: "包裹尺寸-宽（英寸）" },
-    { cm: "包裹尺寸-高（厘米）", inch: "包裹尺寸-高（英寸）" },
+    { cm: "单套尺寸-长（厘米）", inch: "单套尺寸-长（英寸）" },
+    { cm: "单套尺寸-宽（厘米）", inch: "单套尺寸-宽（英寸）" },
+    { cm: "单套尺寸-高（厘米）", inch: "单套尺寸-高（英寸）" },
     { cm: "产品尺寸-长（厘米）", inch: "包装尺寸-长（英寸）" },
     { cm: "产品尺寸-宽（厘米）", inch: "包装尺寸-宽（英寸）" },
     { cm: "产品尺寸-高（厘米）", inch: "包装尺寸-高（英寸）" },
