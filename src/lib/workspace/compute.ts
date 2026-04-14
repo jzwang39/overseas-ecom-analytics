@@ -242,8 +242,8 @@ export function applyComputedFields(
 
   // 10. DIVIDE_CONST rules (temu pricing)
   const divideConstRules = [
-    { target: "temu核价最低标准（未加2.99）", source: "成本总计", divisor: 0.6, digits: 4 },
-    { target: "temu报价", source: "temu核价最低标准（未加2.99）", divisor: 0.6, digits: 4 },
+    { target: "temu核价最低标准（未加2.99）", source: "成本总计", divisor: 0.6, digits: 2 },
+    { target: "temu报价", source: "temu核价最低标准（未加2.99）", divisor: 0.6, digits: 2 },
     { target: "temu售价", source: "temu核价最低标准（未加2.99）", divisor: 0.6, digits: 4 },
   ] as const;
   for (const r of divideConstRules) {
