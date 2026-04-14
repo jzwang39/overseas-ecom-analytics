@@ -871,12 +871,24 @@ export function WorkspaceClient({
   const [selectionHistoryLoading, setSelectionHistoryLoading] = useState(false);
   type InquiryStatusFilter = "" | "待询价" | typeof INQUIRY_STATUS_VALUE | "待分配运营者";
   const [inquiryStatusFilter, setInquiryStatusFilter] = useState<InquiryStatusFilter>("");
+  const [inquiryHistoryMode, setInquiryHistoryMode] = useState(false);
+  const [inquiryHistoryRecords, setInquiryHistoryRecords] = useState<RecordRow[]>([]);
+  const [inquiryHistoryLoading, setInquiryHistoryLoading] = useState(false);
   type PricingStatusFilter = "" | "待核价" | "待分配运营者" | "待确品" | "【核价】已放弃";
   const [pricingStatusFilter, setPricingStatusFilter] = useState<PricingStatusFilter>("");
+  const [pricingHistoryMode, setPricingHistoryMode] = useState(false);
+  const [pricingHistoryRecords, setPricingHistoryRecords] = useState<RecordRow[]>([]);
+  const [pricingHistoryLoading, setPricingHistoryLoading] = useState(false);
   type ConfirmStatusFilter = "" | "待确品" | "待采购";
   const [confirmStatusFilter, setConfirmStatusFilter] = useState<ConfirmStatusFilter>("");
+  const [confirmHistoryMode, setConfirmHistoryMode] = useState(false);
+  const [confirmHistoryRecords, setConfirmHistoryRecords] = useState<RecordRow[]>([]);
+  const [confirmHistoryLoading, setConfirmHistoryLoading] = useState(false);
   type PurchaseStatusFilter = "" | "待采购" | "待发货" | "已到仓" | "已发运";
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<PurchaseStatusFilter>("");
+  const [purchaseHistoryMode, setPurchaseHistoryMode] = useState(false);
+  const [purchaseHistoryRecords, setPurchaseHistoryRecords] = useState<RecordRow[]>([]);
+  const [purchaseHistoryLoading, setPurchaseHistoryLoading] = useState(false);
   const [timeRange, setTimeRange] = useState<
     "" | "today" | "yesterday" | "this_week" | "last_week" | "this_month" | "last_month" | "7d" | "30d" | "custom"
   >("");
@@ -3101,6 +3113,7 @@ export function WorkspaceClient({
 
   const inquiryFilteredRecords = useMemo(() => {
     if (workspaceKey !== "ops.inquiry") return records;
+    if (inquiryHistoryMode) return inquiryHistoryRecords;
     if (!inquiryStatusFilter) {
       return records.filter((r) => {
         const d = toRecordStringUnknown(r.data);
@@ -3112,7 +3125,7 @@ export function WorkspaceClient({
       const d = toRecordStringUnknown(r.data);
       return String(d["状态"] ?? "").trim() === inquiryStatusFilter;
     });
-  }, [inquiryStatusFilter, records, workspaceKey]);
+  }, [inquiryHistoryMode, inquiryHistoryRecords, inquiryStatusFilter, records, workspaceKey]);
 
   const pricingStats = useMemo(() => {
     if (workspaceKey !== "ops.pricing") return null;
@@ -3210,6 +3223,7 @@ export function WorkspaceClient({
 
   const pricingFilteredRecords = useMemo(() => {
     if (workspaceKey !== "ops.pricing") return records;
+    if (pricingHistoryMode) return pricingHistoryRecords;
     if (!pricingStatusFilter) {
       return records.filter((r) => {
         const d = toRecordStringUnknown(r.data);
@@ -3228,7 +3242,7 @@ export function WorkspaceClient({
       if (pricingStatusFilter === "【核价】已放弃") return status === "【核价】已放弃";
       return status === pricingStatusFilter;
     });
-  }, [pricingStatusFilter, records, workspaceKey]);
+  }, [pricingHistoryMode, pricingHistoryRecords, pricingStatusFilter, records, workspaceKey]);
 
   const purchaseStats = useMemo(() => {
     if (workspaceKey !== "ops.purchase") return null;
@@ -3311,6 +3325,7 @@ export function WorkspaceClient({
 
   const purchaseFilteredRecords = useMemo(() => {
     if (workspaceKey !== "ops.purchase") return records;
+    if (purchaseHistoryMode) return purchaseHistoryRecords;
     if (!purchaseStatusFilter) {
       return records.filter((r) => {
         const d = toRecordStringUnknown(r.data);
@@ -3322,7 +3337,7 @@ export function WorkspaceClient({
       const d = toRecordStringUnknown(r.data);
       return String(d["状态"] ?? "").trim() === purchaseStatusFilter;
     });
-  }, [purchaseStatusFilter, records, workspaceKey]);
+  }, [purchaseHistoryMode, purchaseHistoryRecords, purchaseStatusFilter, records, workspaceKey]);
 
   const confirmStats = useMemo(() => {
     if (workspaceKey !== "ops.confirm") return null;
@@ -3382,6 +3397,7 @@ export function WorkspaceClient({
 
   const confirmFilteredRecords = useMemo(() => {
     if (workspaceKey !== "ops.confirm") return records;
+    if (confirmHistoryMode) return confirmHistoryRecords;
     if (!confirmStatusFilter) {
       return records.filter((r) => {
         const d = toRecordStringUnknown(r.data);
@@ -3393,7 +3409,7 @@ export function WorkspaceClient({
       const d = toRecordStringUnknown(r.data);
       return String(d["状态"] ?? "").trim() === confirmStatusFilter;
     });
-  }, [confirmStatusFilter, records, workspaceKey]);
+  }, [confirmHistoryMode, confirmHistoryRecords, confirmStatusFilter, records, workspaceKey]);
 
   const inquiryTableExtraFields = useMemo(() => {
     if (workspaceKey !== "ops.inquiry") return [];
@@ -3537,7 +3553,11 @@ export function WorkspaceClient({
                 setSelectionHistoryMode(true);
                 setSelectionHistoryLoading(true);
                 fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records?myHistory=true`, { cache: "no-store" })
-                  .then((r) => (r.ok ? r.json() : null))
+                  .then(async (r) => {
+                    const text = await r.text();
+                    if (!r.ok) return null;
+                    try { return JSON.parse(text); } catch { return null; }
+                  })
                   .then((json) => {
                     const raw = json && typeof json === "object" && "records" in json ? (json as { records?: unknown }).records : null;
                     if (!Array.isArray(raw)) { setSelectionHistoryRecords([]); return; }
@@ -3564,124 +3584,320 @@ export function WorkspaceClient({
       ) : null}
 
       {inquiryStats ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-          {inquiryStats.map((item) => (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+            {inquiryStats.map((item) => (
+              <button
+                type="button"
+                key={item.label}
+                className={[
+                  "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                  item.bg,
+                  item.borderColor,
+                  !inquiryHistoryMode && inquiryStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                  inquiryHistoryMode ? "opacity-60" : "",
+                ].join(" ")}
+                onClick={() => {
+                  setInquiryHistoryMode(false);
+                  if (!item.filter) {
+                    setInquiryStatusFilter("");
+                    return;
+                  }
+                  setInquiryStatusFilter(inquiryStatusFilter === item.filter ? "" : item.filter);
+                }}
+              >
+                <div>
+                  <div className="text-sm font-medium text-muted">{item.label}</div>
+                  <div className="mt-1 text-2xl font-bold">{item.value}</div>
+                </div>
+                <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                  <item.icon className={`h-6 w-6 ${item.color}`} />
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-start">
             <button
               type="button"
-              key={item.label}
               className={[
-                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
-                item.bg,
-                item.borderColor,
-                inquiryStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                "inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors",
+                inquiryHistoryMode
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-surface hover:bg-surface-2 text-foreground",
               ].join(" ")}
               onClick={() => {
-                if (!item.filter) {
-                  setInquiryStatusFilter("");
+                if (inquiryHistoryMode) {
+                  setInquiryHistoryMode(false);
                   return;
                 }
-                setInquiryStatusFilter(inquiryStatusFilter === item.filter ? "" : item.filter);
+                setInquiryHistoryMode(true);
+                setInquiryHistoryLoading(true);
+                fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records?myHistory=true`, { cache: "no-store" })
+                  .then(async (r) => {
+                    const text = await r.text();
+                    if (!r.ok) { console.error("[inquiryHistory] error", text); return null; }
+                    try { return JSON.parse(text); } catch { return null; }
+                  })
+                  .then((json) => {
+                    const raw = json && typeof json === "object" && "records" in json ? (json as { records?: unknown }).records : null;
+                    if (!Array.isArray(raw)) { setInquiryHistoryRecords([]); return; }
+                    const rows: RecordRow[] = [];
+                    for (const it of raw) {
+                      const obj = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+                      if (!obj) continue;
+                      const id = typeof obj.id === "number" ? obj.id : null;
+                      const updated_at = typeof obj.updated_at === "string" ? obj.updated_at : "";
+                      if (id == null) continue;
+                      rows.push({ id, updated_at, data: obj.data });
+                    }
+                    setInquiryHistoryRecords(rows);
+                  })
+                  .catch(() => setInquiryHistoryRecords([]))
+                  .finally(() => setInquiryHistoryLoading(false));
               }}
+              disabled={inquiryHistoryLoading}
             >
-              <div>
-                <div className="text-sm font-medium text-muted">{item.label}</div>
-                <div className="mt-1 text-2xl font-bold">{item.value}</div>
-              </div>
-              <div className={`rounded-lg p-2 ${item.iconBg}`}>
-                <item.icon className={`h-6 w-6 ${item.color}`} />
-              </div>
+              {inquiryHistoryLoading ? "加载中…" : inquiryHistoryMode ? "退出历史数据" : "查看历史数据"}
             </button>
-          ))}
-        </div>
+          </div>
+        </>
       ) : null}
 
       {pricingStats ? (
-        <div
-          className={[
-            "grid grid-cols-1 gap-4",
-            pricingStats.length >= 4 ? "sm:grid-cols-4" : "sm:grid-cols-3",
-          ].join(" ")}
-        >
-          {pricingStats.map((item) => (
+        <>
+          <div
+            className={[
+              "grid grid-cols-1 gap-4",
+              pricingStats.length >= 4 ? "sm:grid-cols-4" : "sm:grid-cols-3",
+            ].join(" ")}
+          >
+            {pricingStats.map((item) => (
+              <button
+                type="button"
+                key={item.label}
+                className={[
+                  "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                  item.bg,
+                  item.borderColor,
+                  !pricingHistoryMode && pricingStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                  pricingHistoryMode ? "opacity-60" : "",
+                ].join(" ")}
+                onClick={() => {
+                  setPricingHistoryMode(false);
+                  if (!item.filter) {
+                    setPricingStatusFilter("");
+                    return;
+                  }
+                  setPricingStatusFilter(pricingStatusFilter === item.filter ? "" : item.filter);
+                }}
+              >
+                <div>
+                  <div className="text-sm font-medium text-muted">{item.label}</div>
+                  <div className="mt-1 text-2xl font-bold">{item.value}</div>
+                </div>
+                <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                  <item.icon className={`h-6 w-6 ${item.color}`} />
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-start">
             <button
               type="button"
-              key={item.label}
               className={[
-                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
-                item.bg,
-                item.borderColor,
-                pricingStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                "inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors",
+                pricingHistoryMode
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-surface hover:bg-surface-2 text-foreground",
               ].join(" ")}
               onClick={() => {
-                if (!item.filter) {
-                  setPricingStatusFilter("");
+                if (pricingHistoryMode) {
+                  setPricingHistoryMode(false);
                   return;
                 }
-                setPricingStatusFilter(pricingStatusFilter === item.filter ? "" : item.filter);
+                setPricingHistoryMode(true);
+                setPricingHistoryLoading(true);
+                fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records?myHistory=true`, { cache: "no-store" })
+                  .then(async (r) => {
+                    const text = await r.text();
+                    if (!r.ok) { console.error("[pricingHistory] error", text); return null; }
+                    try { return JSON.parse(text); } catch { return null; }
+                  })
+                  .then((json) => {
+                    const raw = json && typeof json === "object" && "records" in json ? (json as { records?: unknown }).records : null;
+                    if (!Array.isArray(raw)) { setPricingHistoryRecords([]); return; }
+                    const rows: RecordRow[] = [];
+                    for (const it of raw) {
+                      const obj = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+                      if (!obj) continue;
+                      const id = typeof obj.id === "number" ? obj.id : null;
+                      const updated_at = typeof obj.updated_at === "string" ? obj.updated_at : "";
+                      if (id == null) continue;
+                      rows.push({ id, updated_at, data: obj.data });
+                    }
+                    setPricingHistoryRecords(rows);
+                  })
+                  .catch(() => setPricingHistoryRecords([]))
+                  .finally(() => setPricingHistoryLoading(false));
               }}
+              disabled={pricingHistoryLoading}
             >
-              <div>
-                <div className="text-sm font-medium text-muted">{item.label}</div>
-                <div className="mt-1 text-2xl font-bold">{item.value}</div>
-              </div>
-              <div className={`rounded-lg p-2 ${item.iconBg}`}>
-                <item.icon className={`h-6 w-6 ${item.color}`} />
-              </div>
+              {pricingHistoryLoading ? "加载中…" : pricingHistoryMode ? "退出历史数据" : "查看历史数据"}
             </button>
-          ))}
-        </div>
+          </div>
+        </>
       ) : null}
 
       {purchaseStats ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
-          {purchaseStats.map((item) => (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-5">
+            {purchaseStats.map((item) => (
+              <button
+                type="button"
+                key={item.label}
+                className={[
+                  "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                  item.bg,
+                  item.borderColor,
+                  !purchaseHistoryMode && purchaseStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                  purchaseHistoryMode ? "opacity-60" : "",
+                ].join(" ")}
+                onClick={() => {
+                  setPurchaseHistoryMode(false);
+                  setPurchaseStatusFilter(purchaseStatusFilter === item.filter ? "" : item.filter);
+                }}
+              >
+                <div>
+                  <div className="text-sm font-medium text-muted">{item.label}</div>
+                  <div className="mt-1 text-2xl font-bold">{item.value}</div>
+                </div>
+                <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                  <item.icon className={`h-6 w-6 ${item.color}`} />
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-start">
             <button
               type="button"
-              key={item.label}
               className={[
-                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
-                item.bg,
-                item.borderColor,
-                purchaseStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                "inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors",
+                purchaseHistoryMode
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-surface hover:bg-surface-2 text-foreground",
               ].join(" ")}
-              onClick={() => setPurchaseStatusFilter(purchaseStatusFilter === item.filter ? "" : item.filter)}
+              onClick={() => {
+                if (purchaseHistoryMode) {
+                  setPurchaseHistoryMode(false);
+                  return;
+                }
+                setPurchaseHistoryMode(true);
+                setPurchaseHistoryLoading(true);
+                fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records?myHistory=true`, { cache: "no-store" })
+                  .then(async (r) => {
+                    const text = await r.text();
+                    if (!r.ok) { console.error("[purchaseHistory] error", text); return null; }
+                    try { return JSON.parse(text); } catch { return null; }
+                  })
+                  .then((json) => {
+                    const raw = json && typeof json === "object" && "records" in json ? (json as { records?: unknown }).records : null;
+                    if (!Array.isArray(raw)) { setPurchaseHistoryRecords([]); return; }
+                    const rows: RecordRow[] = [];
+                    for (const it of raw) {
+                      const obj = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+                      if (!obj) continue;
+                      const id = typeof obj.id === "number" ? obj.id : null;
+                      const updated_at = typeof obj.updated_at === "string" ? obj.updated_at : "";
+                      if (id == null) continue;
+                      rows.push({ id, updated_at, data: obj.data });
+                    }
+                    setPurchaseHistoryRecords(rows);
+                  })
+                  .catch(() => setPurchaseHistoryRecords([]))
+                  .finally(() => setPurchaseHistoryLoading(false));
+              }}
+              disabled={purchaseHistoryLoading}
             >
-              <div>
-                <div className="text-sm font-medium text-muted">{item.label}</div>
-                <div className="mt-1 text-2xl font-bold">{item.value}</div>
-              </div>
-              <div className={`rounded-lg p-2 ${item.iconBg}`}>
-                <item.icon className={`h-6 w-6 ${item.color}`} />
-              </div>
+              {purchaseHistoryLoading ? "加载中…" : purchaseHistoryMode ? "退出历史数据" : "查看历史数据"}
             </button>
-          ))}
-        </div>
+          </div>
+        </>
       ) : null}
 
       {confirmStats ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          {confirmStats.map((item) => (
+        <>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            {confirmStats.map((item) => (
+              <button
+                type="button"
+                key={item.label}
+                className={[
+                  "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
+                  item.bg,
+                  item.borderColor,
+                  !confirmHistoryMode && confirmStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                  confirmHistoryMode ? "opacity-60" : "",
+                ].join(" ")}
+                onClick={() => {
+                  setConfirmHistoryMode(false);
+                  setConfirmStatusFilter(confirmStatusFilter === item.filter ? "" : item.filter);
+                }}
+              >
+                <div>
+                  <div className="text-sm font-medium text-muted">{item.label}</div>
+                  <div className="mt-1 text-2xl font-bold">{item.value}</div>
+                </div>
+                <div className={`rounded-lg p-2 ${item.iconBg}`}>
+                  <item.icon className={`h-6 w-6 ${item.color}`} />
+                </div>
+              </button>
+            ))}
+          </div>
+          <div className="mt-3 flex justify-start">
             <button
               type="button"
-              key={item.label}
               className={[
-                "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
-                item.bg,
-                item.borderColor,
-                confirmStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                "inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors",
+                confirmHistoryMode
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-surface hover:bg-surface-2 text-foreground",
               ].join(" ")}
-              onClick={() => setConfirmStatusFilter(confirmStatusFilter === item.filter ? "" : item.filter)}
+              onClick={() => {
+                if (confirmHistoryMode) {
+                  setConfirmHistoryMode(false);
+                  return;
+                }
+                setConfirmHistoryMode(true);
+                setConfirmHistoryLoading(true);
+                fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records?myHistory=true`, { cache: "no-store" })
+                  .then(async (r) => {
+                    const text = await r.text();
+                    if (!r.ok) { console.error("[confirmHistory] error", text); return null; }
+                    try { return JSON.parse(text); } catch { return null; }
+                  })
+                  .then((json) => {
+                    const raw = json && typeof json === "object" && "records" in json ? (json as { records?: unknown }).records : null;
+                    if (!Array.isArray(raw)) { setConfirmHistoryRecords([]); return; }
+                    const rows: RecordRow[] = [];
+                    for (const it of raw) {
+                      const obj = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+                      if (!obj) continue;
+                      const id = typeof obj.id === "number" ? obj.id : null;
+                      const updated_at = typeof obj.updated_at === "string" ? obj.updated_at : "";
+                      if (id == null) continue;
+                      rows.push({ id, updated_at, data: obj.data });
+                    }
+                    setConfirmHistoryRecords(rows);
+                  })
+                  .catch(() => setConfirmHistoryRecords([]))
+                  .finally(() => setConfirmHistoryLoading(false));
+              }}
+              disabled={confirmHistoryLoading}
             >
-              <div>
-                <div className="text-sm font-medium text-muted">{item.label}</div>
-                <div className="mt-1 text-2xl font-bold">{item.value}</div>
-              </div>
-              <div className={`rounded-lg p-2 ${item.iconBg}`}>
-                <item.icon className={`h-6 w-6 ${item.color}`} />
-              </div>
+              {confirmHistoryLoading ? "加载中…" : confirmHistoryMode ? "退出历史数据" : "查看历史数据"}
             </button>
-          ))}
-        </div>
+          </div>
+        </>
       ) : null}
 
       <div className="rounded-xl border border-border bg-surface p-4">
@@ -4736,28 +4952,30 @@ export function WorkspaceClient({
                                 );
                               })}
                               <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right align-top">
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
-                                    onClick={() => openEdit(row)}
-                                  >
-                                    修改
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className={[
-                                      "inline-flex h-8 items-center justify-center gap-1 rounded-lg border bg-surface px-3 text-xs disabled:opacity-50",
-                                      canWithdraw ? "border-red-300 text-red-500 hover:bg-red-50" : "border-border text-muted",
-                                    ].join(" ")}
-                                    onClick={() => openInquiryWithdraw(row)}
-                                    disabled={!canWithdraw}
-                                    title={canWithdraw ? "撤回" : "仅状态为“待询价”可撤回"}
-                                  >
-                                    <RotateCcw className="h-3.5 w-3.5" />
-                                    撤回
-                                  </button>
-                                </div>
+                                {!inquiryHistoryMode && (
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                      onClick={() => openEdit(row)}
+                                    >
+                                      修改
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={[
+                                        "inline-flex h-8 items-center justify-center gap-1 rounded-lg border bg-surface px-3 text-xs disabled:opacity-50",
+                                        canWithdraw ? "border-red-300 text-red-500 hover:bg-red-50" : "border-border text-muted",
+                                      ].join(" ")}
+                                      onClick={() => openInquiryWithdraw(row)}
+                                      disabled={!canWithdraw}
+                                      title={canWithdraw ? "撤回" : "仅状态为\u201c待询价\u201d可撤回"}
+                                    >
+                                      <RotateCcw className="h-3.5 w-3.5" />
+                                      撤回
+                                    </button>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           );
@@ -5386,24 +5604,26 @@ export function WorkspaceClient({
                                 </div>
                               </td>
                               <td className="sticky right-0 whitespace-nowrap border-b border-border bg-surface px-4 py-3 text-right align-top">
-                                <div className="flex items-center justify-end gap-2">
-                                  <span className="text-xs text-muted">备注</span>
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
-                                    onClick={() => openEdit(row)}
-                                  >
-                                    修改
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
-                                    disabled={busy}
-                                    onClick={() => openPurchaseWithdraw(row)}
-                                  >
-                                    撤回
-                                  </button>
-                                </div>
+                                {!purchaseHistoryMode && (
+                                  <div className="flex items-center justify-end gap-2">
+                                    <span className="text-xs text-muted">备注</span>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                      onClick={() => openEdit(row)}
+                                    >
+                                      修改
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 bg-white px-3 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                      disabled={busy}
+                                      onClick={() => openPurchaseWithdraw(row)}
+                                    >
+                                      撤回
+                                    </button>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           );
@@ -5655,26 +5875,28 @@ export function WorkspaceClient({
                                 </div>
                               </td>
                               <td className="sticky right-0 whitespace-nowrap border-b border-border bg-surface px-4 py-3 text-right align-top">
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
-                                    onClick={() => openEdit(row)}
-                                  >
-                                    修改
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
-                                    disabled={busy}
-                                    onClick={() => openConfirmWithdraw(row)}
-                                    aria-label="撤回"
-                                    title="撤回"
-                                  >
-                                    <RotateCcw className="h-4 w-4" />
-                                    撤回
-                                  </button>
-                                </div>
+                                {!confirmHistoryMode && (
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                                      onClick={() => openEdit(row)}
+                                    >
+                                      修改
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                      disabled={busy}
+                                      onClick={() => openConfirmWithdraw(row)}
+                                      aria-label="撤回"
+                                      title="撤回"
+                                    >
+                                      <RotateCcw className="h-4 w-4" />
+                                      撤回
+                                    </button>
+                                  </div>
+                                )}
                               </td>
                             </tr>
                           );
@@ -5889,6 +6111,7 @@ export function WorkspaceClient({
                               </td>
                             ) : null}
                             <td className="whitespace-nowrap border-b border-border px-3 py-2 text-right">
+                              {!(workspaceKey === "ops.pricing" && pricingHistoryMode) && (
                               <div className="flex justify-end gap-2">
                                 {workspaceKey === "ops.pricing" && (status === "待分配运营者" || !operator) ? (
                                   <button
@@ -5969,6 +6192,7 @@ export function WorkspaceClient({
                                   </button>
                                 ) : null}
                               </div>
+                              )}
                             </td>
                           </tr>
                         );

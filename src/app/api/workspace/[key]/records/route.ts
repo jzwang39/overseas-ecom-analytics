@@ -78,27 +78,122 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
   const endDateRaw = url.searchParams.get("endDate") ?? "";
   const myHistory = url.searchParams.get("myHistory") === "true";
 
-  // --- My history mode: cross-workspace query for ops.selection creator ---
-  if (myHistory && key === "ops.selection") {
+  // --- My history mode ---
+  if (myHistory && (key === "ops.selection" || key === "ops.inquiry" || key === "ops.pricing" || key === "ops.confirm" || key === "ops.purchase")) {
     const pool = getPool();
-    const userName = typeof session.user.name === "string" && session.user.name.trim() ? session.user.name.trim() : null;
-    const userUsername = typeof session.user.username === "string" && session.user.username.trim() ? session.user.username.trim() : null;
-    const names = [...new Set([userName, userUsername].filter(Boolean))] as string[];
-    if (names.length === 0) return NextResponse.json({ records: [] });
-    const placeholders = names.map(() => "?").join(", ");
-    const abandonStatuses = ["【选品】已放弃", "已放弃"];
-    const abandonPlaceholders = abandonStatuses.map(() => "?").join(", ");
-    const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
-      `SELECT id, updated_at, data
-       FROM workspace_records
-       WHERE deleted_at IS NULL
-         AND JSON_UNQUOTE(JSON_EXTRACT(data, '$."选品人"')) IN (${placeholders})
-         AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$."状态"')), '') NOT IN (${abandonPlaceholders})
-       ORDER BY id DESC
-       LIMIT 500`,
-      [...names, ...abandonStatuses],
-    );
-    return NextResponse.json({ records: rows });
+    const userIdNum = Number(session.user.id);
+    try {
+      if (key === "ops.selection") {
+        const excludeStatuses = ["【选品】已放弃", "已放弃"];
+        const placeholders = excludeStatuses.map(() => "?").join(", ");
+        const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
+          `SELECT w.id, w.updated_at, w.data
+           FROM workspace_records w
+           JOIN operation_logs a
+             ON CAST(a.target_id AS UNSIGNED) = w.id
+            AND a.target_type = 'workspace_record'
+            AND a.action = 'workspace.create'
+            AND a.actor_user_id = ?
+           WHERE w.deleted_at IS NULL
+             AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(w.data, '$."状态"')), '') COLLATE utf8mb4_unicode_ci NOT IN (${placeholders})
+           ORDER BY w.id DESC
+           LIMIT 500`,
+          [userIdNum, ...excludeStatuses],
+        );
+        return NextResponse.json({ records: rows });
+      }
+
+      if (key === "ops.inquiry") {
+        // Exclude: 已放弃, 待选品, 待分配【询价】
+        const excludeStatuses = ["已放弃", "【选品】已放弃", "待选品", "待分配【询价】"];
+        const placeholders = excludeStatuses.map(() => "?").join(", ");
+        const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
+          `SELECT DISTINCT w.id, w.updated_at, w.data
+           FROM workspace_records w
+           JOIN operation_logs a
+             ON CAST(a.target_id AS UNSIGNED) = w.id
+            AND a.target_type = 'workspace_record'
+            AND a.action = 'workspace.update'
+            AND a.actor_user_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(a.detail, '$."workspaceKey"')) = 'ops.inquiry'
+           WHERE w.deleted_at IS NULL
+             AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(w.data, '$."状态"')), '') COLLATE utf8mb4_unicode_ci NOT IN (${placeholders})
+           ORDER BY w.id DESC
+           LIMIT 500`,
+          [userIdNum, ...excludeStatuses],
+        );
+        return NextResponse.json({ records: rows });
+      }
+
+      if (key === "ops.pricing") {
+        // Exclude: 已放弃, 待选品, 待分配【询价】, 待询价
+        const excludeStatuses = ["已放弃", "【选品】已放弃", "【核价】已放弃", "待选品", "待分配【询价】", "待询价"];
+        const placeholders = excludeStatuses.map(() => "?").join(", ");
+        const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
+          `SELECT DISTINCT w.id, w.updated_at, w.data
+           FROM workspace_records w
+           JOIN operation_logs a
+             ON CAST(a.target_id AS UNSIGNED) = w.id
+            AND a.target_type = 'workspace_record'
+            AND a.action = 'workspace.update'
+            AND a.actor_user_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(a.detail, '$."workspaceKey"')) = 'ops.pricing'
+           WHERE w.deleted_at IS NULL
+             AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(w.data, '$."状态"')), '') COLLATE utf8mb4_unicode_ci NOT IN (${placeholders})
+           ORDER BY w.id DESC
+           LIMIT 500`,
+          [userIdNum, ...excludeStatuses],
+        );
+        return NextResponse.json({ records: rows });
+      }
+
+      if (key === "ops.confirm") {
+        // Exclude: 已放弃, 待选品, 待分配【询价】, 待询价, 待核价, 待分配运营者
+        const excludeStatuses = ["已放弃", "【选品】已放弃", "【核价】已放弃", "待选品", "待分配【询价】", "待询价", "待核价", "待分配运营者"];
+        const placeholders = excludeStatuses.map(() => "?").join(", ");
+        const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
+          `SELECT DISTINCT w.id, w.updated_at, w.data
+           FROM workspace_records w
+           JOIN operation_logs a
+             ON CAST(a.target_id AS UNSIGNED) = w.id
+            AND a.target_type = 'workspace_record'
+            AND a.action = 'workspace.update'
+            AND a.actor_user_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(a.detail, '$."workspaceKey"')) = 'ops.confirm'
+           WHERE w.deleted_at IS NULL
+             AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(w.data, '$."状态"')), '') COLLATE utf8mb4_unicode_ci NOT IN (${placeholders})
+           ORDER BY w.id DESC
+           LIMIT 500`,
+          [userIdNum, ...excludeStatuses],
+        );
+        return NextResponse.json({ records: rows });
+      }
+
+      if (key === "ops.purchase") {
+        // Exclude: 已放弃, 待选品, 待分配【询价】, 待询价, 待核价, 待分配运营者, 待确品
+        const excludeStatuses = ["已放弃", "【选品】已放弃", "【核价】已放弃", "待选品", "待分配【询价】", "待询价", "待核价", "待分配运营者", "待确品"];
+        const placeholders = excludeStatuses.map(() => "?").join(", ");
+        const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
+          `SELECT DISTINCT w.id, w.updated_at, w.data
+           FROM workspace_records w
+           JOIN operation_logs a
+             ON CAST(a.target_id AS UNSIGNED) = w.id
+            AND a.target_type = 'workspace_record'
+            AND a.action = 'workspace.update'
+            AND a.actor_user_id = ?
+            AND JSON_UNQUOTE(JSON_EXTRACT(a.detail, '$."workspaceKey"')) = 'ops.purchase'
+           WHERE w.deleted_at IS NULL
+             AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(w.data, '$."状态"')), '') COLLATE utf8mb4_unicode_ci NOT IN (${placeholders})
+           ORDER BY w.id DESC
+           LIMIT 500`,
+          [userIdNum, ...excludeStatuses],
+        );
+        return NextResponse.json({ records: rows });
+      }
+    } catch (err) {
+      console.error("[myHistory] query error:", err);
+      return NextResponse.json({ error: String(err) }, { status: 500 });
+    }
   }
 
   const filtersParsed = z
