@@ -9,6 +9,7 @@ export function SettingsTabs() {
     { href: "/settings/users", label: "用户管理" },
     { href: "/settings/roles", label: "角色管理" },
     { href: "/settings/categories", label: "类目配置" },
+    { href: "/settings/last-mile-pricing", label: "尾程价目表" },
     { href: "/settings/menus", label: "菜单管理" },
     { href: "/settings/logs", label: "操作日志" },
   ];

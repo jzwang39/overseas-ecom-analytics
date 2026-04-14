@@ -134,6 +134,7 @@ export const MENU_GROUPS: MenuGroup[] = [
       { key: "settings.users", label: "用户管理", href: "/settings/users", icon: "user" },
       { key: "settings.roles", label: "角色管理", href: "/settings/roles", icon: "shield" },
       { key: "settings.categories", label: "类目配置", href: "/settings/categories", icon: "tag" },
+      { key: "settings.last_mile_pricing", label: "尾程价目表", href: "/settings/last-mile-pricing", icon: "truck" },
       { key: "settings.menus", label: "菜单管理", href: "/settings/menus", icon: "grid" },
       { key: "settings.logs", label: "操作日志", href: "/settings/logs", icon: "file-text" },
     ],
