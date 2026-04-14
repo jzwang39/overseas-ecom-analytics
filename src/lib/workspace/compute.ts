@@ -71,6 +71,7 @@ export function applyComputedFields(
   // Apply defaults
   if (schema.fields.includes("体积重系数") && !out["体积重系数"]) out["体积重系数"] = "6000";
   if (schema.fields.includes("运输包装体积系数") && !out["运输包装体积系数"]) out["运输包装体积系数"] = "6000";
+  if (schema.fields.includes("海外仓（操作费）") && !out["海外仓（操作费）"]) out["海外仓（操作费）"] = "7.25";
 
   // 1. 包裹体积（立方厘米）= L × W × H
   if (

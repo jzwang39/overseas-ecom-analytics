@@ -313,6 +313,7 @@ function getDefaultFieldValue(field: string) {
   const kind = getFieldKind(field);
   if (kind === "yesno") return "否";
   if (field === "体积重系数" || field === "运输包装体积系数") return "6000";
+  if (field === "海外仓（操作费）") return "7.25";
   if (field === "产品规格输入方式") return "分开输入";
   return "";
 }
@@ -640,6 +641,7 @@ function applyComputedFields(schema: { fields: string[] }, data: Record<string, 
   // Apply defaults
   if (schema.fields.includes("体积重系数") && !out["体积重系数"]) out["体积重系数"] = "6000";
   if (schema.fields.includes("运输包装体积系数") && !out["运输包装体积系数"]) out["运输包装体积系数"] = "6000";
+  if (schema.fields.includes("海外仓（操作费）") && !out["海外仓（操作费）"]) out["海外仓（操作费）"] = "7.25";
 
   // 包裹体积（立方厘米）= L × W × H
   if (
@@ -921,6 +923,7 @@ export function WorkspaceClient({
     factoryLocation: string;
     factoryContact: string;
     factoryPhone: string;
+    purchaseCost: string;
   }>({
     productName: "",
     category: "",
@@ -939,6 +942,7 @@ export function WorkspaceClient({
     factoryLocation: "",
     factoryContact: "",
     factoryPhone: "",
+    purchaseCost: "",
   });
   const [inquiryActionLoading, setInquiryActionLoading] = useState<null | "save" | "submit">(null);
   const [inquiryEditingId, setInquiryEditingId] = useState<number | null>(null);
@@ -1149,6 +1153,7 @@ export function WorkspaceClient({
       factoryLocation: "",
       factoryContact: "",
       factoryPhone: "",
+      purchaseCost: "",
     });
     setInquiryActionLoading(null);
     setInquiryEditingId(null);
@@ -1403,6 +1408,7 @@ export function WorkspaceClient({
     if (inquiryForm.discountPolicy.trim()) data["优惠政策"] = inquiryForm.discountPolicy.trim();
     if (inquiryForm.discountPolicy === "有" && inquiryForm.discountNote.trim()) data["优惠政策备注"] = inquiryForm.discountNote.trim();
     if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
+    if (inquiryForm.purchaseCost.trim()) data["采购成本"] = inquiryForm.purchaseCost.trim();
     if (operatorName) data["运营人员"] = operatorName;
 
     const stringData: Record<string, string> = {};
@@ -1418,7 +1424,9 @@ export function WorkspaceClient({
       "包裹尺寸-长（英寸）",
       "包裹尺寸-宽（英寸）",
       "包裹尺寸-高（英寸）",
+      "派送费（需要测试？）",
       "尾程成本（人民币）",
+      "采购成本",
       "成本总计",
       "负向成本",
       "人民币报价",
@@ -1453,6 +1461,7 @@ export function WorkspaceClient({
     inquiryForm.productImages,
     inquiryForm.productName,
     inquiryForm.productUnitPrice,
+    inquiryForm.purchaseCost,
     inquiryForm.referenceLinks,
     operatorName,
     records,
@@ -1608,6 +1617,7 @@ export function WorkspaceClient({
       factoryLocation: "",
       factoryContact: "",
       factoryPhone: "",
+      purchaseCost: "",
     });
     setInquiryActionLoading(null);
     setInquiryCreateOpen(true);
@@ -1650,6 +1660,7 @@ export function WorkspaceClient({
       if (discountPolicy) data["优惠政策"] = discountPolicy;
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
       if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
+      if (inquiryForm.purchaseCost.trim()) data["采购成本"] = inquiryForm.purchaseCost.trim();
       if (operatorName) data["运营人员"] = operatorName;
 
       const stringData: Record<string, string> = {};
@@ -2532,6 +2543,7 @@ export function WorkspaceClient({
         factoryLocation: String(obj["工厂所在地"] ?? ""),
         factoryContact: String(obj["工厂联系人"] ?? ""),
         factoryPhone: String(obj["联系人电话"] ?? ""),
+        purchaseCost: String(obj["采购成本"] ?? ""),
       });
       setInquiryActionLoading(null);
       setInquiryCreateOpen(true);
@@ -6471,6 +6483,23 @@ export function WorkspaceClient({
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 rounded-lg border border-border bg-surface p-3">
+              <div className="text-sm font-medium">成本信息</div>
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                <div>
+                  <div className="text-xs text-muted">采购成本</div>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={inquiryForm.purchaseCost}
+                    onChange={(e) => setInquiryForm((prev) => ({ ...prev, purchaseCost: e.target.value }))}
+                    placeholder="请输入采购成本"
+                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                  />
                 </div>
               </div>
             </div>
