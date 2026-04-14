@@ -866,6 +866,9 @@ export function WorkspaceClient({
     | typeof INQUIRY_STATUS_VALUE
     | typeof SELECTION_ABANDON_STATUS_VALUE;
   const [selectionStatusFilter, setSelectionStatusFilter] = useState<SelectionStatusFilter>("");
+  const [selectionHistoryMode, setSelectionHistoryMode] = useState(false);
+  const [selectionHistoryRecords, setSelectionHistoryRecords] = useState<RecordRow[]>([]);
+  const [selectionHistoryLoading, setSelectionHistoryLoading] = useState(false);
   type InquiryStatusFilter = "" | "待询价" | typeof INQUIRY_STATUS_VALUE | "待分配运营者";
   const [inquiryStatusFilter, setInquiryStatusFilter] = useState<InquiryStatusFilter>("");
   type PricingStatusFilter = "" | "待核价" | "待分配运营者" | "待确品" | "【核价】已放弃";
@@ -3005,6 +3008,7 @@ export function WorkspaceClient({
 
   const selectionFilteredRecords = useMemo(() => {
     if (workspaceKey !== "ops.selection") return records;
+    if (selectionHistoryMode) return selectionHistoryRecords;
     if (!selectionStatusFilter) {
       return records.filter((r) => {
         const d = toRecordStringUnknown(r.data);
@@ -3025,7 +3029,7 @@ export function WorkspaceClient({
       }
       return status === selectionStatusFilter;
     });
-  }, [records, selectionStatusFilter, workspaceKey]);
+  }, [records, selectionHistoryMode, selectionHistoryRecords, selectionStatusFilter, workspaceKey]);
 
   const inquiryStats = useMemo(() => {
     if (workspaceKey !== "ops.inquiry") return null;
@@ -3488,7 +3492,8 @@ export function WorkspaceClient({
       </div>
 
       {selectionStats ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
           {selectionStats.map((item) => (
             <button
               type="button"
@@ -3497,9 +3502,13 @@ export function WorkspaceClient({
                 "flex items-center justify-between rounded-xl border p-4 text-left transition-colors hover:bg-surface-2",
                 item.bg,
                 item.borderColor,
-                selectionStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                !selectionHistoryMode && selectionStatusFilter === item.filter ? "ring-2 ring-primary/20" : "",
+                selectionHistoryMode ? "opacity-60" : "",
               ].join(" ")}
-              onClick={() => setSelectionStatusFilter(selectionStatusFilter === item.filter ? "" : item.filter)}
+              onClick={() => {
+                setSelectionHistoryMode(false);
+                setSelectionStatusFilter(selectionStatusFilter === item.filter ? "" : item.filter);
+              }}
             >
               <div>
                 <div className="text-sm font-medium text-muted">{item.label}</div>
@@ -3510,6 +3519,47 @@ export function WorkspaceClient({
               </div>
             </button>
           ))}
+          </div>
+          <div className="flex">
+            <button
+              type="button"
+              className={[
+                "inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-4 text-sm font-medium transition-colors",
+                selectionHistoryMode
+                  ? "border-primary bg-primary text-white"
+                  : "border-border bg-surface hover:bg-surface-2 text-foreground",
+              ].join(" ")}
+              onClick={() => {
+                if (selectionHistoryMode) {
+                  setSelectionHistoryMode(false);
+                  return;
+                }
+                setSelectionHistoryMode(true);
+                setSelectionHistoryLoading(true);
+                fetch(`/api/workspace/${encodeURIComponent(workspaceKey)}/records?myHistory=true`, { cache: "no-store" })
+                  .then((r) => (r.ok ? r.json() : null))
+                  .then((json) => {
+                    const raw = json && typeof json === "object" && "records" in json ? (json as { records?: unknown }).records : null;
+                    if (!Array.isArray(raw)) { setSelectionHistoryRecords([]); return; }
+                    const rows: RecordRow[] = [];
+                    for (const it of raw) {
+                      const obj = it && typeof it === "object" ? (it as Record<string, unknown>) : null;
+                      if (!obj) continue;
+                      const id = typeof obj.id === "number" ? obj.id : null;
+                      const updated_at = typeof obj.updated_at === "string" ? obj.updated_at : "";
+                      if (id == null) continue;
+                      rows.push({ id, updated_at, data: obj.data });
+                    }
+                    setSelectionHistoryRecords(rows);
+                  })
+                  .catch(() => setSelectionHistoryRecords([]))
+                  .finally(() => setSelectionHistoryLoading(false));
+              }}
+              disabled={selectionHistoryLoading}
+            >
+              {selectionHistoryLoading ? "加载中…" : selectionHistoryMode ? "退出历史数据" : "查看历史数据"}
+            </button>
+          </div>
         </div>
       ) : null}
 
@@ -4412,7 +4462,7 @@ export function WorkspaceClient({
                               </td>
                               <td className="border-b border-border px-3 py-2 align-top text-right">
                                 <div className="flex justify-end gap-2">
-                                  {(() => {
+                                  {selectionHistoryMode ? null : (() => {
                                     const locked =
                                       status === INQUIRY_STATUS_VALUE ||
                                       status === SELECTION_ABANDON_STATUS_VALUE ||

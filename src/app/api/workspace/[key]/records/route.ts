@@ -76,6 +76,30 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
   const timeRangeRaw = url.searchParams.get("timeRange") ?? "";
   const startDateRaw = url.searchParams.get("startDate") ?? "";
   const endDateRaw = url.searchParams.get("endDate") ?? "";
+  const myHistory = url.searchParams.get("myHistory") === "true";
+
+  // --- My history mode: cross-workspace query for ops.selection creator ---
+  if (myHistory && key === "ops.selection") {
+    const pool = getPool();
+    const userName = typeof session.user.name === "string" && session.user.name.trim() ? session.user.name.trim() : null;
+    const userUsername = typeof session.user.username === "string" && session.user.username.trim() ? session.user.username.trim() : null;
+    const names = [...new Set([userName, userUsername].filter(Boolean))] as string[];
+    if (names.length === 0) return NextResponse.json({ records: [] });
+    const placeholders = names.map(() => "?").join(", ");
+    const abandonStatuses = ["【选品】已放弃", "已放弃"];
+    const abandonPlaceholders = abandonStatuses.map(() => "?").join(", ");
+    const [rows] = await pool.query<(RowDataPacket & { id: number; updated_at: string; data: unknown })[]>(
+      `SELECT id, updated_at, data
+       FROM workspace_records
+       WHERE deleted_at IS NULL
+         AND JSON_UNQUOTE(JSON_EXTRACT(data, '$."选品人"')) IN (${placeholders})
+         AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(data, '$."状态"')), '') NOT IN (${abandonPlaceholders})
+       ORDER BY id DESC
+       LIMIT 500`,
+      [...names, ...abandonStatuses],
+    );
+    return NextResponse.json({ records: rows });
+  }
 
   const filtersParsed = z
     .string()
