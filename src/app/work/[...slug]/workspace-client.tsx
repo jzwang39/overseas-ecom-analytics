@@ -112,7 +112,6 @@ const PRICING_COMPUTED_SUMMARY_FIELDS = [
 ] as const;
 
 const INQUIRY_COST_SUMMARY_FIELDS = [
-  "采购成本",
   "成本总计",
   "人民币报价",
   "temu核价最低标准（未加2.99）",
@@ -325,7 +324,8 @@ function isNumericField(field: string) {
     field.includes("销量") ||
     field.includes("实重") ||
     field.includes("计费重") ||
-    field.includes("费用")
+    field.includes("费用") ||
+    field.includes("采购价")
   );
 }
 
@@ -977,7 +977,6 @@ export function WorkspaceClient({
     factoryLocation: string;
     factoryContact: string;
     factoryPhone: string;
-    purchaseCost: string;
     usdRate: string;
   }>({
     productName: "",
@@ -998,7 +997,6 @@ export function WorkspaceClient({
     factoryLocation: "",
     factoryContact: "",
     factoryPhone: "",
-    purchaseCost: "",
     usdRate: "",
   });
   const [inquiryActionLoading, setInquiryActionLoading] = useState<null | "save" | "submit">(null);
@@ -1211,7 +1209,6 @@ export function WorkspaceClient({
       factoryLocation: "",
       factoryContact: "",
       factoryPhone: "",
-      purchaseCost: "",
       usdRate: "",
     });
     setInquiryActionLoading(null);
@@ -1467,12 +1464,13 @@ export function WorkspaceClient({
     if (inquiryForm.discountPolicy.trim()) data["优惠政策"] = inquiryForm.discountPolicy.trim();
     if (inquiryForm.discountPolicy === "有" && inquiryForm.discountNote.trim()) data["优惠政策备注"] = inquiryForm.discountNote.trim();
     if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
-    if (inquiryForm.purchaseCost.trim()) data["采购成本"] = inquiryForm.purchaseCost.trim();
     if (inquiryForm.usdRate.trim()) data["美元汇率"] = inquiryForm.usdRate.trim();
     if (operatorName) data["运营人员"] = operatorName;
 
     const stringData: Record<string, string> = {};
     for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
+    // 采购成本 = 产品单价（同一字段，无条件同步）
+    stringData["采购成本"] = inquiryForm.productUnitPrice.trim();
     const computedData = applyComputedFields(schema, stringData, lastMilePricing);
 
     const previewFields = [
@@ -1522,7 +1520,6 @@ export function WorkspaceClient({
     inquiryForm.productImages,
     inquiryForm.productName,
     inquiryForm.productUnitPrice,
-    inquiryForm.purchaseCost,
     inquiryForm.usdRate,
     inquiryForm.referenceLinks,
     operatorName,
@@ -1680,7 +1677,6 @@ export function WorkspaceClient({
       factoryLocation: "",
       factoryContact: "",
       factoryPhone: "",
-      purchaseCost: "",
       usdRate: "",
     });
     setInquiryActionLoading(null);
@@ -1726,7 +1722,7 @@ export function WorkspaceClient({
       if (discountPolicy) data["优惠政策"] = discountPolicy;
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
       if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
-      if (inquiryForm.purchaseCost.trim()) data["采购成本"] = inquiryForm.purchaseCost.trim();
+      if (unitPrice) data["采购成本"] = unitPrice;
       if (inquiryForm.usdRate.trim()) data["美元汇率"] = inquiryForm.usdRate.trim();
       if (operatorName) data["运营人员"] = operatorName;
 
@@ -2615,7 +2611,6 @@ export function WorkspaceClient({
         factoryLocation: String(obj["工厂所在地"] ?? ""),
         factoryContact: String(obj["工厂联系人"] ?? ""),
         factoryPhone: String(obj["联系人电话"] ?? ""),
-        purchaseCost: String(obj["采购成本"] ?? ""),
         usdRate: String(obj["美元汇率"] ?? ""),
       });
       setInquiryActionLoading(null);
@@ -2771,6 +2766,10 @@ export function WorkspaceClient({
       const rawValue = f === "参考链接" && referenceLinksOverride != null ? referenceLinksOverride : (editing.data[f] ?? "");
       const v = String(rawValue).trim();
       const kind = getFieldKind(f);
+      if (workspaceKey === "ops.selection" && f === "名称" && !v) {
+        alert("商品名称 为必填项");
+        return;
+      }
       if (kind === "url" && v) {
         const parts = parseDelimitedValues(v);
         const invalid = parts.find((it) => !looksLikeUrl(it));
@@ -2876,7 +2875,7 @@ export function WorkspaceClient({
         if (id === null && spec !== null) {
           const nextData = { ...payload };
           if (schema.fields.includes("产品规格")) nextData["产品规格"] = spec;
-          if (schema.fields.includes("产品规则")) nextData["产品规则"] = spec;
+          if (schema.fields.includes("产品规则") && spec) nextData["产品规则"] = spec;
           if (schema.fields.includes("创建时间")) nextData["创建时间"] = formatNow();
           if (schema.fields.includes("最后更新时间")) nextData["最后更新时间"] = null;
           if (overrideStatus) nextData["状态"] = overrideStatus;
@@ -2903,7 +2902,7 @@ export function WorkspaceClient({
 
           const nextData = { ...payload };
           if (schema.fields.includes("产品规格")) nextData["产品规格"] = spec;
-          if (schema.fields.includes("产品规则")) nextData["产品规则"] = spec;
+          if (schema.fields.includes("产品规则") && spec) nextData["产品规则"] = spec;
           if (schema.fields.includes("状态") && existingStatus && !overrideStatus) nextData["状态"] = existingStatus;
           if (overrideStatus) nextData["状态"] = overrideStatus;
 
@@ -6679,6 +6678,7 @@ export function WorkspaceClient({
                     <div className="flex flex-col gap-1">
                       <div className="text-xs text-muted">产品单价</div>
                       <input
+                        type="number"
                         inputMode="decimal"
                         value={inquiryForm.productUnitPrice}
                       onChange={(e) => {
@@ -6687,8 +6687,12 @@ export function WorkspaceClient({
                           selectionStart: e.currentTarget.selectionStart,
                           selectionEnd: e.currentTarget.selectionEnd,
                         };
-                        setInquiryForm((prev) => ({ ...prev, productUnitPrice: e.target.value }));
+                        setInquiryForm((prev) => ({ ...prev, productUnitPrice: sanitizeDecimalInput(e.target.value) }));
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                      }}
+                      onWheel={(e) => { e.currentTarget.blur(); }}
                       ref={(el) => {
                         inquiryModalFieldRefs.current["inquiry-create-unit-price"] = el;
                       }}
@@ -6698,6 +6702,7 @@ export function WorkspaceClient({
                     <div className="flex flex-col gap-1">
                       <div className="text-xs text-muted">起订量</div>
                       <input
+                        type="number"
                         inputMode="numeric"
                         value={inquiryForm.moq}
                       onChange={(e) => {
@@ -6706,8 +6711,12 @@ export function WorkspaceClient({
                           selectionStart: e.currentTarget.selectionStart,
                           selectionEnd: e.currentTarget.selectionEnd,
                         };
-                        setInquiryForm((prev) => ({ ...prev, moq: e.target.value }));
+                        setInquiryForm((prev) => ({ ...prev, moq: sanitizeDecimalInput(e.target.value) }));
                       }}
+                      onKeyDown={(e) => {
+                        if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                      }}
+                      onWheel={(e) => { e.currentTarget.blur(); }}
                       ref={(el) => {
                         inquiryModalFieldRefs.current["inquiry-create-moq"] = el;
                       }}
@@ -6873,17 +6882,6 @@ export function WorkspaceClient({
             <div className="mt-3 rounded-lg border border-border bg-surface p-3">
               <div className="text-sm font-medium">成本信息</div>
               <div className="mt-2 grid gap-3 sm:grid-cols-2">
-                <div>
-                  <div className="text-xs text-muted">采购成本</div>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    value={inquiryForm.purchaseCost}
-                    onChange={(e) => setInquiryForm((prev) => ({ ...prev, purchaseCost: e.target.value }))}
-                    placeholder="请输入采购成本"
-                    className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                  />
-                </div>
                 <div>
                   <div className="text-xs text-muted">美元汇率</div>
                   <input
@@ -8486,7 +8484,7 @@ export function WorkspaceClient({
                     workspaceKey === "ops.pricing" ||
                     workspaceKey === "ops.confirm";
 
-                  const renderField = (f: string, opts?: { hideLabel?: boolean; wrapperClassName?: string }) => {
+                  const renderField = (f: string, opts?: { hideLabel?: boolean; wrapperClassName?: string; required?: boolean }) => {
                     const kind = getFieldKind(f);
                     const sourceForInch = getCmSourceForInchField(schema, f);
                     const maxRule = getMaxComputedRule(schema, f);
@@ -8649,7 +8647,7 @@ export function WorkspaceClient({
                               useRowLayout ? "sm:w-28 sm:shrink-0" : ""
                             }`}
                           >
-                            <div className="min-w-0 flex-1 truncate">{displayFieldLabel(f)}</div>
+                            <div className="min-w-0 flex-1 truncate">{displayFieldLabel(f)}{opts?.required ? <span className="ml-0.5 text-red-500">*</span> : null}</div>
                             {computedHelp ? (
                               <button
                                 type="button"
@@ -10777,7 +10775,7 @@ export function WorkspaceClient({
                         <div className="text-sm font-medium">基本信息</div>
                         <div className="mt-3 grid gap-3 sm:grid-cols-[11rem,1fr]">
                           {fields.includes("产品图片") ? <div className="sm:row-span-4">{renderField("产品图片")}</div> : null}
-                          {fields.includes("名称") ? <div className="sm:col-start-2">{renderField("名称")}</div> : null}
+                          {fields.includes("名称") ? <div className="sm:col-start-2">{renderField("名称", { required: true })}</div> : null}
                           {fields.includes("参考链接") ? <div className="sm:col-start-2">{renderField("参考链接")}</div> : null}
 
                           {fields.includes("平台在售价格（Min）") || fields.includes("平台在售价格（Max）") ? (

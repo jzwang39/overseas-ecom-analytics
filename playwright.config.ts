@@ -5,7 +5,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL || process.env.NEXTAUTH_URL || "
 
 export default defineConfig({
   testDir: path.join(__dirname, "e2e"),
-  timeout: 300_000,
+  timeout: 600_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),

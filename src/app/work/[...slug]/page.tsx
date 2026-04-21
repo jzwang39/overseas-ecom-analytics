@@ -1,4 +1,7 @@
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/auth/server";
 import { MENU_GROUPS } from "@/lib/menu/config";
+import { getAllowedMenuKeysByRoleId } from "@/lib/menu/server";
 import { WorkspaceClient } from "./workspace-client";
 
 function findLabelByHref(href: string) {
@@ -36,6 +39,16 @@ export default async function WorkspacePage({
         <div className="mt-2 text-sm text-muted">未找到对应菜单：{href}</div>
       </div>
     );
+  }
+
+  const session = await getSession();
+  if (!session?.user?.id) {
+    redirect(`/auth/login?callbackUrl=${encodeURIComponent(href)}`);
+  }
+
+  const allowed = await getAllowedMenuKeysByRoleId(session.user.roleId);
+  if (!allowed.has(labels.key)) {
+    redirect("/work");
   }
 
   return (

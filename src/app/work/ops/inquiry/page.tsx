@@ -1,5 +1,7 @@
+import { requireWorkspacePageAccess } from "@/app/work/page-access";
 import { WorkspaceClient } from "../../[...slug]/workspace-client";
 
 export default async function OpsInquiryPage() {
-  return <WorkspaceClient workspaceKey="ops.inquiry" title="询价" groupLabel="业务运营" hideCreateButton />;
+  const labels = await requireWorkspacePageAccess("/work/ops/inquiry");
+  return <WorkspaceClient workspaceKey={labels.key} title={labels.item} groupLabel={labels.group} hideCreateButton />;
 }

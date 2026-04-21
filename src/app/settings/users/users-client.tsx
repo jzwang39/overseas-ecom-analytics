@@ -67,9 +67,9 @@ export function UsersClient() {
         fetch("/api/admin/users", { cache: "no-store" }),
         fetch("/api/admin/roles", { cache: "no-store" }),
       ]);
-      const usersJson = await usersRes.json();
-      const rolesJson = await rolesRes.json();
-      setUsers(usersJson.users ?? []);
+      const usersJson = usersRes.ok ? await usersRes.json().catch(() => ({})) : {};
+      const rolesJson = rolesRes.ok ? await rolesRes.json().catch(() => ({})) : {};
+      setUsers(Array.isArray(usersJson.users) ? usersJson.users : []);
       setRoles(coerceRoles(rolesJson.roles));
     } finally {
       setLoading(false);
