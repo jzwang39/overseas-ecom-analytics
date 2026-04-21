@@ -6312,11 +6312,10 @@ export function WorkspaceClient({
 
               <div className="flex-1 overflow-hidden rounded-lg border border-border bg-surface-2">
                 <div className="flex h-[60vh] items-center justify-center">
-                  <Image
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
                     src={imageViewer.urls[imageViewer.index] ?? ""}
                     alt="图片预览"
-                    width={1400}
-                    height={900}
                     className="h-[60vh] w-full object-contain"
                   />
                 </div>
