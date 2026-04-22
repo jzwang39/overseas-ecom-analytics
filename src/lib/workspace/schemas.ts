@@ -140,6 +140,7 @@ export const PURCHASE_FIELDS: string[] = [
   "撤回理由",
   "放弃理由",
   "运营人员",
+  "询价附件",
   "创建时间",
   "最后更新时间",
 ];

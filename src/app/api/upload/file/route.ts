@@ -1,0 +1,54 @@
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
+import crypto from "node:crypto";
+import { getSession } from "@/lib/auth/server";
+import { ensureInitialSuperAdmin } from "@/lib/db/seed";
+
+export const runtime = "nodejs";
+
+const MAX_BYTES = 10 * 1024 * 1024;
+
+const ALLOWED_TYPES: Record<string, string> = {
+  "application/pdf": ".pdf",
+  "image/jpeg": ".jpg",
+  "image/png": ".png",
+  "image/webp": ".webp",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+};
+
+function getUploadBaseDir() {
+  const env = process.env.UPLOAD_DIR;
+  if (env && env.trim()) return env.trim();
+  return path.join(process.cwd(), "public", "uploads");
+}
+
+export async function POST(req: NextRequest) {
+  await ensureInitialSuperAdmin();
+  const session = await getSession();
+  if (!session?.user?.id) return NextResponse.json({ error: "未登录" }, { status: 401 });
+
+  const form = await req.formData().catch(() => null);
+  if (!form) return NextResponse.json({ error: "参数错误" }, { status: 400 });
+  const file = form.get("file");
+  if (!file || !(file instanceof File)) return NextResponse.json({ error: "缺少文件" }, { status: 400 });
+
+  const ext = ALLOWED_TYPES[file.type];
+  if (!ext) return NextResponse.json({ error: "仅支持 PDF、JPG、PNG、DOCX 格式" }, { status: 400 });
+  if (file.size > MAX_BYTES) return NextResponse.json({ error: "文件大小不能超过 10MB" }, { status: 400 });
+
+  const buf = Buffer.from(await file.arrayBuffer());
+  const now = new Date();
+  const y = String(now.getFullYear());
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const dir = path.join(getUploadBaseDir(), `${y}${m}`);
+  await fs.mkdir(dir, { recursive: true });
+
+  const filename = `${crypto.randomUUID()}${ext}`;
+  const abs = path.join(dir, filename);
+  await fs.writeFile(abs, buf);
+
+  const url = `/uploads/${y}${m}/${filename}`;
+  return NextResponse.json({ url, name: file.name });
+}

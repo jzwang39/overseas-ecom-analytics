@@ -33,6 +33,10 @@ function contentTypeFromExt(ext: string) {
       return "image/webp";
     case ".gif":
       return "image/gif";
+    case ".pdf":
+      return "application/pdf";
+    case ".docx":
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
     default:
       return "application/octet-stream";
   }

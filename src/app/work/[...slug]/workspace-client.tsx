@@ -969,6 +969,11 @@ export function WorkspaceClient({
     discountPolicy: "" | "有" | "无";
     discountNote: string;
     deliveryCycle: string;
+    headFreightCost: string;
+    productLengthCm: string;
+    productWidthCm: string;
+    productHeightCm: string;
+    productWeightKg: string;
     packageLengthCm: string;
     packageWidthCm: string;
     packageHeightCm: string;
@@ -989,6 +994,11 @@ export function WorkspaceClient({
     discountPolicy: "",
     discountNote: "",
     deliveryCycle: "",
+    headFreightCost: "",
+    productLengthCm: "",
+    productWidthCm: "",
+    productHeightCm: "",
+    productWeightKg: "",
     packageLengthCm: "",
     packageWidthCm: "",
     packageHeightCm: "",
@@ -1000,6 +1010,8 @@ export function WorkspaceClient({
     usdRate: "",
   });
   const [inquiryActionLoading, setInquiryActionLoading] = useState<null | "save" | "submit">(null);
+  const [inquiryAttachments, setInquiryAttachments] = useState<{ name: string; url: string }[]>([]);
+  const [uploadingInquiryAttachment, setUploadingInquiryAttachment] = useState(false);
   const [inquiryEditingId, setInquiryEditingId] = useState<number | null>(null);
   const [inquiryEditingStatus, setInquiryEditingStatus] = useState("");
   const [inquiryAssignOpen, setInquiryAssignOpen] = useState(false);
@@ -1201,6 +1213,11 @@ export function WorkspaceClient({
       discountPolicy: "",
       discountNote: "",
       deliveryCycle: "",
+      headFreightCost: "",
+      productLengthCm: "",
+      productWidthCm: "",
+      productHeightCm: "",
+      productWeightKg: "",
       packageLengthCm: "",
       packageWidthCm: "",
       packageHeightCm: "",
@@ -1211,6 +1228,7 @@ export function WorkspaceClient({
       factoryPhone: "",
       usdRate: "",
     });
+    setInquiryAttachments([]);
     setInquiryActionLoading(null);
     setInquiryEditingId(null);
     setInquiryEditingStatus("");
@@ -1464,8 +1482,10 @@ export function WorkspaceClient({
     if (inquiryForm.discountPolicy.trim()) data["优惠政策"] = inquiryForm.discountPolicy.trim();
     if (inquiryForm.discountPolicy === "有" && inquiryForm.discountNote.trim()) data["优惠政策备注"] = inquiryForm.discountNote.trim();
     if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
+    if (inquiryForm.headFreightCost.trim()) data["头程成本"] = inquiryForm.headFreightCost.trim();
     if (inquiryForm.usdRate.trim()) data["美元汇率"] = inquiryForm.usdRate.trim();
     if (operatorName) data["运营人员"] = operatorName;
+    if (inquiryAttachments.length > 0) data["询价附件"] = JSON.stringify(inquiryAttachments);
 
     const stringData: Record<string, string> = {};
     for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
@@ -1669,6 +1689,7 @@ export function WorkspaceClient({
       discountPolicy: "",
       discountNote: "",
       deliveryCycle: "",
+      headFreightCost: "",
       packageLengthCm: "",
       packageWidthCm: "",
       packageHeightCm: "",
@@ -1678,7 +1699,12 @@ export function WorkspaceClient({
       factoryContact: "",
       factoryPhone: "",
       usdRate: "",
+      productLengthCm: "",
+      productWidthCm: "",
+      productHeightCm: "",
+      productWeightKg: "",
     });
+    setInquiryAttachments([]);
     setInquiryActionLoading(null);
     setInquiryCreateOpen(true);
   }
@@ -1722,9 +1748,11 @@ export function WorkspaceClient({
       if (discountPolicy) data["优惠政策"] = discountPolicy;
       if (discountPolicy === "有" && discountNote) data["优惠政策备注"] = discountNote;
       if (inquiryForm.deliveryCycle.trim()) data["交货周期"] = inquiryForm.deliveryCycle.trim();
+      if (inquiryForm.headFreightCost.trim()) data["头程成本"] = inquiryForm.headFreightCost.trim();
       if (unitPrice) data["采购成本"] = unitPrice;
       if (inquiryForm.usdRate.trim()) data["美元汇率"] = inquiryForm.usdRate.trim();
       if (operatorName) data["运营人员"] = operatorName;
+      if (inquiryAttachments.length > 0) data["询价附件"] = JSON.stringify(inquiryAttachments);
 
       const stringData: Record<string, string> = {};
       for (const [k, v] of Object.entries(data)) stringData[k] = String(v ?? "");
@@ -2603,6 +2631,11 @@ export function WorkspaceClient({
         discountPolicy: ((obj["优惠政策"] ?? "") as "" | "有" | "无") || "",
         discountNote: String(obj["优惠政策备注"] ?? ""),
         deliveryCycle: String(obj["交货周期"] ?? ""),
+        headFreightCost: String(obj["头程成本"] ?? ""),
+        productLengthCm: String(obj["产品尺寸-长（厘米）"] ?? ""),
+        productWidthCm: String(obj["产品尺寸-宽（厘米）"] ?? ""),
+        productHeightCm: String(obj["产品尺寸-高（厘米）"] ?? ""),
+        productWeightKg: String(obj["产品重量"] ?? ""),
         packageLengthCm: String(obj["单套尺寸-长（厘米）"] ?? ""),
         packageWidthCm: String(obj["单套尺寸-宽（厘米）"] ?? ""),
         packageHeightCm: String(obj["单套尺寸-高（厘米）"] ?? ""),
@@ -2613,6 +2646,12 @@ export function WorkspaceClient({
         factoryPhone: String(obj["联系人电话"] ?? ""),
         usdRate: String(obj["美元汇率"] ?? ""),
       });
+      try {
+        const raw = String(obj["询价附件"] ?? "");
+        setInquiryAttachments(raw ? (JSON.parse(raw) as { name: string; url: string }[]) : []);
+      } catch {
+        setInquiryAttachments([]);
+      }
       setInquiryActionLoading(null);
       setInquiryCreateOpen(true);
       return;
@@ -2711,6 +2750,26 @@ export function WorkspaceClient({
     }
     const json = await res.json().catch(() => ({}));
     return typeof json.url === "string" ? json.url : null;
+  }
+
+  async function uploadFile(file: File): Promise<{ name: string; url: string } | null> {
+    if (file.size > 10 * 1024 * 1024) {
+      alert("文件大小不能超过 10MB");
+      return null;
+    }
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/upload/file", { method: "POST", body: form });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      alert(json.error ?? "上传失败");
+      return null;
+    }
+    const json = await res.json().catch(() => ({}));
+    if (typeof json.url === "string" && typeof json.name === "string") {
+      return { name: json.name as string, url: json.url as string };
+    }
+    return null;
   }
 
   async function saveEdit(statusOrEvent?: string | unknown) {
@@ -4802,6 +4861,7 @@ export function WorkspaceClient({
                           const obj = toRecordStringUnknown(row.data);
                           const status = String(obj["状态"] ?? "").trim();
                           const canWithdraw = status === "待询价";
+                          const isAssigning = status === "待分配【询价】";
                           const name = String(obj["名称"] ?? "").trim() || "—";
                           const imageRaw = String(obj["产品图片"] ?? "");
                           const imageUrls = parseImageUrls(imageRaw);
@@ -4851,11 +4911,10 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      <Image
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
                                         src={firstImageUrl}
                                         alt={name}
-                                        width={44}
-                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -4937,11 +4996,10 @@ export function WorkspaceClient({
                                           openImageViewer(extraImageUrls, 0);
                                         }}
                                       >
-                                        <Image
+                                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                                        <img
                                           src={extraFirstImageUrl}
                                           alt={displayFieldLabel(f)}
-                                          width={40}
-                                          height={40}
                                           className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-surface-2 object-cover"
                                         />
                                         <span className="cursor-pointer text-xs underline">
@@ -4980,8 +5038,10 @@ export function WorkspaceClient({
                                   <div className="flex justify-end gap-2">
                                     <button
                                       type="button"
-                                      className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2"
+                                      className="inline-flex h-8 items-center justify-center rounded-lg border border-border bg-surface px-3 text-xs hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                                       onClick={() => openEdit(row)}
+                                      disabled={isAssigning}
+                                      title={isAssigning ? "请先完成询价分配后再修改" : undefined}
                                     >
                                       修改
                                     </button>
@@ -4989,11 +5049,11 @@ export function WorkspaceClient({
                                       type="button"
                                       className={[
                                         "inline-flex h-8 items-center justify-center gap-1 rounded-lg border bg-surface px-3 text-xs disabled:opacity-50",
-                                        canWithdraw ? "border-red-300 text-red-500 hover:bg-red-50" : "border-border text-muted",
+                                        canWithdraw && !isAssigning ? "border-red-300 text-red-500 hover:bg-red-50" : "border-border text-muted",
                                       ].join(" ")}
                                       onClick={() => openInquiryWithdraw(row)}
-                                      disabled={!canWithdraw}
-                                      title={canWithdraw ? "撤回" : "仅状态为\u201c待询价\u201d可撤回"}
+                                      disabled={!canWithdraw || isAssigning}
+                                      title={isAssigning ? "请先完成询价分配后再撤回" : canWithdraw ? "撤回" : "仅状态为\u201c待询价\u201d可撤回"}
                                     >
                                       <RotateCcw className="h-3.5 w-3.5" />
                                       撤回
@@ -5164,11 +5224,10 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      <Image
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
                                         src={firstImageUrl}
                                         alt={name}
-                                        width={44}
-                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -5489,11 +5548,10 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      <Image
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
                                         src={firstImageUrl}
                                         alt={name}
-                                        width={44}
-                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -5764,11 +5822,10 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      <Image
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
                                         src={firstImageUrl}
                                         alt={name}
-                                        width={44}
-                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -6066,11 +6123,10 @@ export function WorkspaceClient({
                                         openImageViewer(imageUrls, 0);
                                       }}
                                     >
-                                      <Image
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
                                         src={firstImageUrl}
                                         alt={displayFieldLabel(f)}
-                                        width={40}
-                                        height={40}
                                         className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                       <span className="cursor-pointer text-xs underline">
@@ -6349,7 +6405,8 @@ export function WorkspaceClient({
                     onClick={() => setImageViewer((prev) => (prev ? { ...prev, index: idx } : prev))}
                     aria-label={`查看第 ${idx + 1} 张`}
                   >
-                    <Image src={u} alt={`缩略图 ${idx + 1}`} width={64} height={64} className="h-16 w-16 object-cover" />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={u} alt={`缩略图 ${idx + 1}`} className="h-16 w-16 object-cover" />
                   </button>
                 ))}
               </div>
@@ -6425,11 +6482,10 @@ export function WorkspaceClient({
                             className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm text-foreground hover:bg-surface-2"
                             onClick={() => openImageViewer(urls, 0)}
                           >
-                            <Image
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
                               src={first}
                               alt="产品图片"
-                              width={32}
-                              height={32}
                               className="h-8 w-8 cursor-pointer rounded border border-border bg-surface-2 object-cover"
                             />
                             <span className="cursor-pointer text-xs underline">
@@ -6475,6 +6531,87 @@ export function WorkspaceClient({
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
                       <div className="text-sm font-medium">产品属性</div>
+                      <span className="inline-flex h-5 items-center rounded-md border border-border px-2 text-[10px] text-muted">
+                        只读
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className={[
+                          "inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs",
+                          inquiryUnits === "cmkg"
+                            ? "border-primary bg-surface text-primary"
+                            : "border-border bg-surface hover:bg-surface-2 text-muted",
+                        ].join(" ")}
+                        onClick={() => setInquiryUnits("cmkg")}
+                      >
+                        cm/kg
+                      </button>
+                      <button
+                        type="button"
+                        className={[
+                          "inline-flex h-8 items-center justify-center rounded-lg border px-3 text-xs",
+                          inquiryUnits === "inlb"
+                            ? "border-primary bg-surface text-primary"
+                            : "border-border bg-surface hover:bg-surface-2 text-muted",
+                        ].join(" ")}
+                        onClick={() => setInquiryUnits("inlb")}
+                      >
+                        英寸/英镑
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-3 grid gap-3">
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">产品尺寸（长 / 宽 / 高，{inquiryUnits === "cmkg" ? "cm" : "in"}）</div>
+                      <div className="flex gap-2">
+                        <input
+                          readOnly
+                          value={inquiryUnits === "cmkg" ? inquiryForm.productLengthCm : (cmToInchesValue(inquiryForm.productLengthCm) ?? "")}
+                          placeholder="长"
+                          className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                        />
+                        <input
+                          readOnly
+                          value={inquiryUnits === "cmkg" ? inquiryForm.productWidthCm : (cmToInchesValue(inquiryForm.productWidthCm) ?? "")}
+                          placeholder="宽"
+                          className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                        />
+                        <input
+                          readOnly
+                          value={inquiryUnits === "cmkg" ? inquiryForm.productHeightCm : (cmToInchesValue(inquiryForm.productHeightCm) ?? "")}
+                          placeholder="高"
+                          className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">产品重量（{inquiryUnits === "cmkg" ? "kg" : "lb"}）</div>
+                      <input
+                        readOnly
+                        value={inquiryUnits === "cmkg" ? inquiryForm.productWeightKg : (kgToLbValue(inquiryForm.productWeightKg) ?? "")}
+                        placeholder="请输入重量"
+                        className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">产品规格</div>
+                      <input
+                        readOnly
+                        value={inquiryForm.productSpec}
+                        placeholder="—"
+                        className="h-10 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-surface p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium">单套属性</div>
                       <span className="inline-flex h-5 items-center rounded-md border border-border px-2 text-[10px] text-muted">
                         尺寸/重量
                       </span>
@@ -6649,25 +6786,6 @@ export function WorkspaceClient({
                         className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <div className="text-xs text-muted">产品规格</div>
-                      <input
-                        value={inquiryForm.productSpec}
-                        onChange={(e) => {
-                          pendingInquiryModalFocus.current = {
-                            key: "inquiry-create-product-spec",
-                            selectionStart: e.currentTarget.selectionStart,
-                            selectionEnd: e.currentTarget.selectionEnd,
-                          };
-                          setInquiryForm((prev) => ({ ...prev, productSpec: e.target.value }));
-                        }}
-                        ref={(el) => {
-                          inquiryModalFieldRefs.current["inquiry-create-product-spec"] = el;
-                        }}
-                        placeholder="请输入产品规格"
-                        className="h-10 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
-                      />
-                    </div>
                   </div>
                 </div>
 
@@ -6764,6 +6882,21 @@ export function WorkspaceClient({
                         ref={(el) => {
                           inquiryModalFieldRefs.current["inquiry-create-delivery-cycle"] = el;
                         }}
+                        className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <div className="text-xs text-muted">头程成本</div>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        value={inquiryForm.headFreightCost}
+                        onChange={(e) => setInquiryForm((prev) => ({ ...prev, headFreightCost: sanitizeDecimalInput(e.target.value) }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "e" || e.key === "E" || e.key === "+" || e.key === "-") e.preventDefault();
+                        }}
+                        onWheel={(e) => e.currentTarget.blur()}
+                        placeholder="请输入头程成本"
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
@@ -6873,6 +7006,71 @@ export function WorkspaceClient({
                         className="h-9 w-full rounded-lg border border-border bg-surface px-3 text-sm outline-none"
                       />
                     </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-surface p-3">
+                  <div className="text-sm font-medium">附件上传</div>
+                  <div className="mt-3 flex flex-col gap-2">
+                    <label
+                      className={`flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-surface-2 py-6 text-center transition-colors ${uploadingInquiryAttachment ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-surface"}`}
+                    >
+                      <input
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png,.docx"
+                        multiple
+                        disabled={uploadingInquiryAttachment}
+                        className="hidden"
+                        onChange={async (e) => {
+                          const files = Array.from(e.target.files ?? []);
+                          e.target.value = "";
+                          if (files.length === 0) return;
+                          setUploadingInquiryAttachment(true);
+                          try {
+                            const results: { name: string; url: string }[] = [];
+                            for (const file of files) {
+                              const result = await uploadFile(file);
+                              if (result) results.push(result);
+                            }
+                            if (results.length > 0) {
+                              setInquiryAttachments((prev) => [...prev, ...results]);
+                            }
+                          } finally {
+                            setUploadingInquiryAttachment(false);
+                          }
+                        }}
+                      />
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+                      </svg>
+                      <div className="text-sm font-medium text-foreground">
+                        {uploadingInquiryAttachment ? "上传中…" : "点击上传 或拖拽文件至此"}
+                      </div>
+                      <div className="text-xs text-muted">支持 PDF, JPG, PNG, DOCX（最大 10MB）</div>
+                    </label>
+                    {inquiryAttachments.length > 0 ? (
+                      <div className="flex flex-col gap-1">
+                        {inquiryAttachments.map((att, idx) => (
+                          <div key={idx} className="flex items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2">
+                            <a
+                              href={att.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="min-w-0 flex-1 truncate text-sm text-foreground underline hover:text-primary"
+                            >
+                              {att.name}
+                            </a>
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs text-muted hover:text-red-500"
+                              onClick={() => setInquiryAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                            >
+                              删除
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -8680,11 +8878,10 @@ export function WorkspaceClient({
                                             onClick={() => setImageIndexByField((prev) => ({ ...prev, [f]: idx }))}
                                           >
                                             {looksLikeImagePath(u) ? (
-                                              <Image
+                                              // eslint-disable-next-line @next/next/no-img-element
+                                              <img
                                                 src={u}
                                                 alt={`${displayFieldLabel(f)} ${idx + 1}`}
-                                                width={40}
-                                                height={40}
                                                 className="h-10 w-10 object-cover"
                                               />
                                             ) : (
@@ -8790,11 +8987,10 @@ export function WorkspaceClient({
 
                                   <div className="mt-2 flex justify-center">
                                     {looksLikeImagePath(url) ? (
-                                      <Image
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
                                         src={url}
                                         alt={displayFieldLabel(f)}
-                                        width={560}
-                                        height={560}
                                         className="max-h-56 w-auto max-w-full rounded-md border border-border bg-surface-2 object-contain"
                                       />
                                     ) : (
@@ -9456,35 +9652,33 @@ export function WorkspaceClient({
                       );
                     };
 
-                    const renderReadonlyImage = () => {
+                     const renderReadonlyImage = () => {
                       if (!schema.fields.includes("产品图片")) return null;
                       const imageRaw = String(editing.data["产品图片"] ?? "");
                       const urls = parseImageUrls(imageRaw).filter(looksLikeImagePath);
-                      const first = urls[0] ?? "";
                       return (
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1.5">
                           <div className="text-xs text-muted">产品图片</div>
-                          <div className="rounded-xl border border-dashed border-border bg-surface-2 p-4">
-                            {first ? (
-                              <button
-                                type="button"
-                                className="block w-full"
-                                onClick={() => {
-                                  openImageViewer(urls, 0);
-                                }}
-                              >
-                                <Image
-                                  src={first}
-                                  alt="产品图片"
-                                  width={640}
-                                  height={360}
-                                  className="h-40 w-full rounded-lg border border-border bg-surface object-cover"
-                                />
-                              </button>
-                            ) : (
-                              <div className="flex h-40 items-center justify-center text-sm text-muted">—</div>
-                            )}
-                          </div>
+                          {urls.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {urls.slice(0, 8).map((u, idx) => (
+                                <button
+                                  key={`${u}-${idx}`}
+                                  type="button"
+                                  className="h-12 w-12 overflow-hidden rounded-md border border-border bg-surface-2 hover:opacity-80"
+                                  onClick={() => openImageViewer(urls, idx)}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={u} alt={`产品图片 ${idx + 1}`} className="h-full w-full object-cover" />
+                                </button>
+                              ))}
+                              {urls.length > 8 ? (
+                                <div className="flex h-12 w-12 items-center justify-center text-xs text-muted">+{urls.length - 8}</div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted">—</div>
+                          )}
                         </div>
                       );
                     };
@@ -9523,13 +9717,15 @@ export function WorkspaceClient({
                         {renderCard(
                           "基本信息",
                           <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>,
-                          <div className="grid gap-4 sm:grid-cols-[10rem,1fr]">
-                            <div>{renderReadonlyImage()}</div>
-                            <div className="flex flex-col gap-3">
-                              {fields.includes("名称") ? renderField("名称") : null}
-                              {renderReadonlyLinks()}
-                              {renderPriceRangeRow()}
-                              {fields.includes("所属类目") ? renderField("所属类目") : null}
+                          <div className="flex flex-col gap-3">
+                            {fields.includes("名称") ? renderField("名称") : null}
+                            <div className="grid gap-4 sm:grid-cols-[10rem,1fr]">
+                              <div>{renderReadonlyImage()}</div>
+                              <div className="flex flex-col gap-3">
+                                {renderReadonlyLinks()}
+                                {renderPriceRangeRow()}
+                                {fields.includes("所属类目") ? renderField("所属类目") : null}
+                              </div>
                             </div>
                           </div>,
                         )}
@@ -10102,31 +10298,29 @@ export function WorkspaceClient({
                       if (!schema.fields.includes("产品图片")) return null;
                       const imageRaw = String(editing.data["产品图片"] ?? "");
                       const urls = parseImageUrls(imageRaw).filter(looksLikeImagePath);
-                      const first = urls[0] ?? "";
                       return (
-                        <div className="flex flex-col gap-1">
+                        <div className="flex flex-col gap-1.5">
                           <div className="text-xs text-muted">产品图片</div>
-                          <div className="rounded-xl border border-dashed border-border bg-surface-2 p-4">
-                            {first ? (
-                              <button
-                                type="button"
-                                className="block w-full"
-                                onClick={() => {
-                                  openImageViewer(urls, 0);
-                                }}
-                              >
-                                <Image
-                                  src={first}
-                                  alt="产品图片"
-                                  width={640}
-                                  height={360}
-                                  className="h-40 w-full rounded-lg border border-border bg-surface object-cover"
-                                />
-                              </button>
-                            ) : (
-                              <div className="flex h-40 items-center justify-center text-sm text-muted">—</div>
-                            )}
-                          </div>
+                          {urls.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {urls.slice(0, 8).map((u, idx) => (
+                                <button
+                                  key={`${u}-${idx}`}
+                                  type="button"
+                                  className="h-12 w-12 overflow-hidden rounded-md border border-border bg-surface-2 hover:opacity-80"
+                                  onClick={() => openImageViewer(urls, idx)}
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={u} alt={`产品图片 ${idx + 1}`} className="h-full w-full object-cover" />
+                                </button>
+                              ))}
+                              {urls.length > 8 ? (
+                                <div className="flex h-12 w-12 items-center justify-center text-xs text-muted">+{urls.length - 8}</div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-muted">—</div>
+                          )}
                         </div>
                       );
                     };
@@ -10169,32 +10363,34 @@ export function WorkspaceClient({
                         {renderCard(
                           "基本信息",
                           <div className="rounded-md bg-surface-2 px-2 py-1 text-xs text-muted">只读</div>,
-                          <div className="grid gap-4 sm:grid-cols-[10rem,1fr]">
-                            <div>{renderReadonlyImage()}</div>
-                            <div className="flex flex-col gap-3">
-                              {schema.fields.includes("名称") ? (
-                                <div className="flex flex-col gap-1">
-                                  <div className="text-xs text-muted">商品名称</div>
-                                  <input
-                                    value={String(editing.data["名称"] ?? "")}
-                                    readOnly
-                                    disabled
-                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
-                                  />
-                                </div>
-                              ) : null}
-                              {renderReadonlyLinks()}
-                              {schema.fields.includes("所属类目") ? (
-                                <div className="flex flex-col gap-1">
-                                  <div className="text-xs text-muted">所属类目</div>
-                                  <input
-                                    value={String(editing.data["所属类目"] ?? "")}
-                                    readOnly
-                                    disabled
-                                    className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
-                                  />
-                                </div>
-                              ) : null}
+                          <div className="flex flex-col gap-4">
+                            {schema.fields.includes("名称") ? (
+                              <div className="flex flex-col gap-1">
+                                <div className="text-xs text-muted">商品名称</div>
+                                <input
+                                  value={String(editing.data["名称"] ?? "")}
+                                  readOnly
+                                  disabled
+                                  className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                />
+                              </div>
+                            ) : null}
+                            <div className="grid gap-4 sm:grid-cols-[10rem,1fr]">
+                              <div>{renderReadonlyImage()}</div>
+                              <div className="flex flex-col gap-3">
+                                {renderReadonlyLinks()}
+                                {schema.fields.includes("所属类目") ? (
+                                  <div className="flex flex-col gap-1">
+                                    <div className="text-xs text-muted">所属类目</div>
+                                    <input
+                                      value={String(editing.data["所属类目"] ?? "")}
+                                      readOnly
+                                      disabled
+                                      className="h-9 w-full cursor-not-allowed rounded-lg border border-border bg-surface px-3 text-sm outline-none opacity-70"
+                                    />
+                                  </div>
+                                ) : null}
+                              </div>
                             </div>
                           </div>,
                         )}
@@ -10718,11 +10914,10 @@ export function WorkspaceClient({
                                           className="block"
                                           onClick={() => openImageViewer(urls, idx)}
                                         >
-                                          <Image
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img
                                             src={u}
                                             alt="发票附件"
-                                            width={240}
-                                            height={160}
                                             className="h-24 w-full rounded-xl border border-border bg-surface object-cover"
                                           />
                                         </button>
@@ -10772,55 +10967,131 @@ export function WorkspaceClient({
                     <div className="flex flex-col gap-3">
                       <div className="rounded-lg border border-border bg-surface p-3">
                         <div className="text-sm font-medium">基本信息</div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-[11rem,1fr]">
-                          {fields.includes("产品图片") ? <div className="sm:row-span-4">{renderField("产品图片")}</div> : null}
-                          {fields.includes("名称") ? <div className="sm:col-start-2">{renderField("名称", { required: true })}</div> : null}
-                          {fields.includes("参考链接") ? <div className="sm:col-start-2">{renderField("参考链接")}</div> : null}
-
-                          {fields.includes("平台在售价格（Min）") || fields.includes("平台在售价格（Max）") ? (
-                            <div className="sm:col-start-2">
-                              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
-                                <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格</div>
-                                <div className="flex flex-1 items-center gap-2">
-                                  {fields.includes("平台在售价格模式") ? (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const isFixed = String(editing.data["平台在售价格模式"] ?? "") === "固定价格";
-                                        const next = isFixed ? "" : "固定价格";
-                                        setEditing((prev) => {
-                                          if (!prev) return prev;
-                                          const d: Record<string, string> = { ...prev.data, "平台在售价格模式": next };
-                                          if (!isFixed) d["平台在售价格（Max）"] = "";
-                                          return { ...prev, data: d };
-                                        });
+                        <div className="mt-3 flex flex-col gap-3">
+                          {fields.includes("名称") ? renderField("名称", { required: true }) : null}
+                          {fields.includes("产品图片") ? (() => {
+                            const imgField = "产品图片";
+                            const imgValue = editing.data[imgField] ?? "";
+                            const imgUrls = parseImageUrls(imgValue);
+                            return (
+                              <div className="flex flex-col gap-1.5">
+                                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                                  <div className="text-xs text-muted sm:w-28 sm:shrink-0">产品图片</div>
+                                  <label
+                                    className={`flex flex-1 items-center justify-center rounded-lg border border-dashed border-border bg-surface-2 py-1.5 text-xs text-muted hover:bg-surface ${uploadingField === imgField ? "cursor-not-allowed opacity-60" : "cursor-pointer"}`}
+                                  >
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      multiple
+                                      disabled={uploadingField === imgField}
+                                      className="hidden"
+                                      onChange={async (e) => {
+                                        const files = Array.from(e.target.files ?? []);
+                                        e.target.value = "";
+                                        if (files.length === 0) return;
+                                        setUploadingField(imgField);
+                                        try {
+                                          const existing = parseImageUrls(imgValue);
+                                          const uploaded: string[] = [];
+                                          for (const file of files) {
+                                            const url = await uploadImage(file);
+                                            if (url) uploaded.push(url);
+                                          }
+                                          if (uploaded.length > 0) {
+                                            setEditing((prev) => {
+                                              if (!prev) return prev;
+                                              return { ...prev, data: { ...prev.data, [imgField]: joinImageUrls([...existing, ...uploaded]) } };
+                                            });
+                                          }
+                                        } finally {
+                                          setUploadingField(null);
+                                        }
                                       }}
-                                      className={`shrink-0 rounded border px-2 py-1 text-xs ${String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted hover:border-primary/50"}`}
-                                    >
-                                      固定价格
-                                    </button>
-                                  ) : null}
-                                  {String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? (
-                                    <div className="flex-1">
-                                      {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
-                                    </div>
-                                  ) : (
-                                    <div className="grid flex-1 gap-3 sm:grid-cols-2">
-                                      {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
-                                      {fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
-                                    </div>
-                                  )}
+                                    />
+                                    {uploadingField === imgField ? "上传中…" : "+ 图片"}
+                                  </label>
                                 </div>
+                                {imgUrls.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1 sm:pl-[calc(7rem+0.75rem)]">
+                                    {imgUrls.slice(0, 8).map((u, idx) => (
+                                      <div key={`${u}-${idx}`} className="relative h-12 w-12">
+                                        <button
+                                          type="button"
+                                          className="h-12 w-12 overflow-hidden rounded-md border border-border bg-surface-2 hover:opacity-80"
+                                          onClick={() => openImageViewer(imgUrls, idx)}
+                                        >
+                                          {looksLikeImagePath(u) ? (
+                                            // eslint-disable-next-line @next/next/no-img-element
+                                            <img src={u} alt={`产品图片 ${idx + 1}`} className="h-full w-full object-cover" />
+                                          ) : (
+                                            <span className="flex h-full w-full items-center justify-center text-[10px] text-muted">链接</span>
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black/60 text-[10px] leading-none text-white hover:bg-black/80"
+                                          onClick={() => {
+                                            const next = imgUrls.filter((_, i) => i !== idx);
+                                            setEditing((prev) => {
+                                              if (!prev) return prev;
+                                              return { ...prev, data: { ...prev.data, [imgField]: joinImageUrls(next) } };
+                                            });
+                                          }}
+                                        >
+                                          ×
+                                        </button>
+                                      </div>
+                                    ))}
+                                    {imgUrls.length > 8 ? (
+                                      <div className="flex h-12 w-12 items-center justify-center text-xs text-muted">+{imgUrls.length - 8}</div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                              </div>
+                            );
+                          })() : null}
+                          {fields.includes("所属类目") ? renderField("所属类目") : null}
+                          {fields.includes("参考链接") ? renderField("参考链接") : null}
+                          {fields.includes("平台在售价格（Min）") || fields.includes("平台在售价格（Max）") ? (
+                            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                              <div className="text-xs text-muted sm:w-28 sm:shrink-0">平台在售价格</div>
+                              <div className="flex flex-1 items-center gap-2">
+                                {fields.includes("平台在售价格模式") ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const isFixed = String(editing.data["平台在售价格模式"] ?? "") === "固定价格";
+                                      const next = isFixed ? "" : "固定价格";
+                                      setEditing((prev) => {
+                                        if (!prev) return prev;
+                                        const d: Record<string, string> = { ...prev.data, "平台在售价格模式": next };
+                                        if (!isFixed) d["平台在售价格（Max）"] = "";
+                                        return { ...prev, data: d };
+                                      });
+                                    }}
+                                    className={`shrink-0 rounded border px-2 py-1 text-xs ${String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? "border-primary bg-primary/10 text-primary" : "border-border text-muted hover:border-primary/50"}`}
+                                  >
+                                    固定价格
+                                  </button>
+                                ) : null}
+                                {String(editing.data["平台在售价格模式"] ?? "") === "固定价格" ? (
+                                  <div className="flex-1">
+                                    {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                                  </div>
+                                ) : (
+                                  <div className="grid flex-1 gap-3 sm:grid-cols-2">
+                                    {fields.includes("平台在售价格（Min）") ? renderField("平台在售价格（Min）", { hideLabel: true }) : null}
+                                    {fields.includes("平台在售价格（Max）") ? renderField("平台在售价格（Max）", { hideLabel: true }) : null}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           ) : null}
-
-                          {fields.includes("所属类目") ? <div className="sm:col-start-2">{renderField("所属类目")}</div> : null}
-
                         </div>
                       </div>
                       <div className="rounded-lg border border-border bg-surface p-3">
-                        <div className="text-sm font-medium">规格信息</div>
+                        <div className="text-sm font-medium">产品属性</div>
                         <div className="mt-3 grid gap-3">
                           {(() => {
                             if (
