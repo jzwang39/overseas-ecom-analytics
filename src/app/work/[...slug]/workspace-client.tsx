@@ -4649,7 +4649,7 @@ export function WorkspaceClient({
                       ) : (
                   selectionFilteredRecords.map((row) => {
                     const d = toRecordStringUnknown(row.data);
-                    const images = parseDelimitedValues(String(d["产品图片"] ?? "")).filter(looksLikeImagePath);
+                    const images = parseImageUrls(String(d["产品图片"] ?? "")).filter(looksLikeImagePath);
                     const firstImage = images[0] || "";
                     const name = String(d["名称"] ?? "—");
                     const links = parseDelimitedValues(String(d["参考链接"] ?? "")).filter(looksLikeUrl);
@@ -4685,11 +4685,11 @@ export function WorkspaceClient({
                                       className="relative h-10 w-10 shrink-0 cursor-pointer overflow-hidden rounded-lg border border-border bg-surface-2"
                                       onClick={() => openImageViewer(images, 0)}
                                     >
-                                      <Image
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
                                         src={firstImage}
                                         alt={name}
-                                        fill
-                                        className="object-cover"
+                                        className="h-full w-full object-cover"
                                       />
                                     </div>
                                   ) : (
