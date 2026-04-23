@@ -532,6 +532,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ key: string
     return r;
   });
 
+  if (key === "ops.inquiry") {
+    const [[countRow]] = await pool.query<(RowDataPacket & { cnt: number })[]>(
+      `SELECT COUNT(*) AS cnt FROM workspace_records WHERE workspace_key = 'ops.purchase' AND deleted_at IS NULL AND JSON_UNQUOTE(JSON_EXTRACT(data, '$."状态"')) = '待分配运营者'`,
+    );
+    const waitOperatorCount = Number(countRow?.cnt ?? 0);
+    return NextResponse.json({ records, waitOperatorCount });
+  }
+
   return NextResponse.json({ records });
 }
 
@@ -640,6 +648,37 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ key: strin
     "INSERT INTO workspace_records(workspace_key, data, abandon_reason) VALUES (?, CAST(? AS JSON), ?)",
     [storageKey, JSON.stringify(normalized), abandonReason],
   );
+
+  if (key === "ops.inquiry") {
+    const status = typeof normalized["状态"] === "string" ? normalized["状态"].trim() : "";
+    if (status === "待分配运营者" || status === "待核价") {
+      const productRule = typeof normalized["产品规则"] === "string" ? normalized["产品规则"].trim() : "";
+      if (productRule) {
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET deleted_at = NOW() WHERE workspace_key = 'ops.purchase' AND product_rule = ? AND deleted_at IS NULL AND id <> ? LIMIT 1",
+          [productRule, result.insertId],
+        );
+      }
+      try {
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET workspace_key = 'ops.purchase' WHERE id = ? AND workspace_key = 'ops.selection' AND deleted_at IS NULL LIMIT 1",
+          [result.insertId],
+        );
+      } catch (err) {
+        const e = err as { code?: unknown };
+        const code = typeof e?.code === "string" ? e.code : "";
+        if (code !== "ER_DUP_ENTRY" || !productRule) throw err;
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET deleted_at = NOW() WHERE workspace_key = 'ops.purchase' AND product_rule = ? AND deleted_at IS NULL AND id <> ? LIMIT 1",
+          [productRule, result.insertId],
+        );
+        await pool.query<ResultSetHeader>(
+          "UPDATE workspace_records SET workspace_key = 'ops.purchase' WHERE id = ? AND workspace_key = 'ops.selection' AND deleted_at IS NULL LIMIT 1",
+          [result.insertId],
+        );
+      }
+    }
+  }
 
   await logOperation({
     req,

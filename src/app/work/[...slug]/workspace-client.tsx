@@ -813,6 +813,7 @@ export function WorkspaceClient({
   const { data: session } = useSession();
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<RecordRow[]>([]);
+  const [waitOperatorCount, setWaitOperatorCount] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const [lastMilePricing, setLastMilePricing] = useState<PricingEntry[]>([]);
 
@@ -1612,6 +1613,9 @@ export function WorkspaceClient({
       const res = await fetch(url, { cache: "no-store" });
       const json = await res.json();
       setRecords(json.records ?? []);
+      if (workspaceKey === "ops.inquiry" && typeof json.waitOperatorCount === "number") {
+        setWaitOperatorCount(json.waitOperatorCount);
+      }
     } finally {
       setLoading(false);
     }
@@ -3128,18 +3132,16 @@ export function WorkspaceClient({
 
   const inquiryStats = useMemo(() => {
     if (workspaceKey !== "ops.inquiry") return null;
-    let total = 0;
     let pending = 0;
     let needAssign = 0;
-    let needAssignOperator = 0;
     for (const r of records) {
       const d = toRecordStringUnknown(r.data);
       const status = String(d["状态"] ?? "");
-      if (status === "待询价" || status === INQUIRY_STATUS_VALUE || status === "待分配运营者") total++;
       if (status === "待询价") pending++;
       if (status === INQUIRY_STATUS_VALUE) needAssign++;
-      if (status === "待分配运营者") needAssignOperator++;
     }
+    const needAssignOperator = waitOperatorCount ?? 0;
+    const total = pending + needAssign + needAssignOperator;
     const stats: {
       label: string;
       value: number;
@@ -3192,7 +3194,7 @@ export function WorkspaceClient({
       },
     ];
     return stats;
-  }, [records, workspaceKey]);
+  }, [records, waitOperatorCount, workspaceKey]);
 
   const inquiryFilteredRecords = useMemo(() => {
     if (workspaceKey !== "ops.inquiry") return records;
@@ -5356,8 +5358,8 @@ export function WorkspaceClient({
                                         className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 disabled:opacity-50"
                                         onClick={() => updatePricingRowStatus(row.id, "待确品")}
                                         disabled={busy}
-                                        aria-label="确品"
-                                        title="确品"
+                                        aria-label="确定"
+                                        title="确定"
                                       >
                                         <Check className="h-4 w-4" />
                                       </button>
@@ -5398,9 +5400,9 @@ export function WorkspaceClient({
                                         type="button"
                                         className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 disabled:opacity-50"
                                         onClick={() => updatePricingRowStatus(row.id, "待确品")}
-                                        disabled={busy}
-                                        aria-label="确品"
-                                        title="确品"
+                                        disabled={busy || status === "待分配运营者" || status === "待确品"}
+                                        aria-label="确定"
+                                        title="确定"
                                       >
                                         <Check className="h-4 w-4" />
                                       </button>
@@ -5408,7 +5410,7 @@ export function WorkspaceClient({
                                         type="button"
                                         className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-500 hover:bg-red-100 disabled:opacity-50"
                                         onClick={() => openPricingAbandon(row)}
-                                        disabled={busy}
+                                        disabled={busy || status === "待分配运营者" || status === "待确品"}
                                         aria-label="放弃"
                                         title="放弃"
                                       >
@@ -5418,7 +5420,7 @@ export function WorkspaceClient({
                                         type="button"
                                         className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-muted hover:bg-surface-2 disabled:opacity-50"
                                         onClick={() => openPricingWithdraw(row)}
-                                        disabled={busy}
+                                        disabled={busy || status === "待分配运营者" || status === "待确品"}
                                         aria-label="撤回"
                                         title="撤回"
                                       >
@@ -5960,15 +5962,16 @@ export function WorkspaceClient({
                                   <div className="flex justify-end gap-2">
                                     <button
                                       type="button"
-                                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2"
+                                      className="inline-flex h-9 items-center justify-center rounded-lg border border-border bg-surface px-3 text-sm hover:bg-surface-2 disabled:opacity-50"
                                       onClick={() => openEdit(row)}
+                                      disabled={status === "待采购"}
                                     >
                                       修改
                                     </button>
                                     <button
                                       type="button"
                                       className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-3 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
-                                      disabled={busy}
+                                      disabled={busy || status === "待采购"}
                                       onClick={() => openConfirmWithdraw(row)}
                                       aria-label="撤回"
                                       title="撤回"
@@ -6219,7 +6222,7 @@ export function WorkspaceClient({
                                     type="button"
                                     className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-red-300 bg-surface px-3 text-xs text-red-500 hover:bg-red-50 disabled:opacity-50"
                                     onClick={() => openPricingAbandon(row)}
-                                    disabled={pricingBusy}
+                                    disabled={pricingBusy || status === "待分配运营者" || status === "待确品"}
                                   >
                                     <X className="h-3.5 w-3.5" />
                                     放弃
@@ -6230,7 +6233,7 @@ export function WorkspaceClient({
                                     type="button"
                                     className="inline-flex h-8 items-center justify-center gap-1 rounded-lg border border-border bg-surface px-3 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
                                     onClick={() => openPricingWithdraw(row)}
-                                    disabled={pricingBusy}
+                                    disabled={pricingBusy || status === "待分配运营者" || status === "待确品"}
                                   >
                                     <RotateCcw className="h-3.5 w-3.5" />
                                     撤回
