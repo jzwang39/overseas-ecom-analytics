@@ -4913,10 +4913,11 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
+                                      <Image
                                         src={firstImageUrl}
                                         alt={name}
+                                        width={44}
+                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -4998,12 +4999,13 @@ export function WorkspaceClient({
                                           openImageViewer(extraImageUrls, 0);
                                         }}
                                       >
-                                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                                        <img
-                                          src={extraFirstImageUrl}
-                                          alt={displayFieldLabel(f)}
-                                          className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-surface-2 object-cover"
-                                        />
+                                      <Image
+                                        src={extraFirstImageUrl}
+                                        alt={displayFieldLabel(f)}
+                                        width={40}
+                                        height={40}
+                                        className="h-10 w-10 cursor-pointer rounded-lg border border-border bg-surface-2 object-cover"
+                                      />
                                         <span className="cursor-pointer text-xs underline">
                                           {extraImageUrls.length > 1 ? `查看（${extraImageUrls.length}）` : "查看"}
                                         </span>
@@ -5226,10 +5228,11 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
+                                      <Image
                                         src={firstImageUrl}
                                         alt={name}
+                                        width={44}
+                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -5550,10 +5553,11 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
+                                      <Image
                                         src={firstImageUrl}
                                         alt={name}
+                                        width={44}
+                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
@@ -5824,10 +5828,11 @@ export function WorkspaceClient({
                                       title={imageUrls.join("\n")}
                                       className="shrink-0"
                                     >
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img
+                                      <Image
                                         src={firstImageUrl}
                                         alt={name}
+                                        width={44}
+                                        height={44}
                                         className="h-11 w-11 rounded-lg border border-border bg-surface-2 object-cover"
                                       />
                                     </a>
