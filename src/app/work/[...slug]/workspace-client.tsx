@@ -171,7 +171,7 @@ function parseImageUrls(raw: string) {
     } catch {}
   }
   return s
-    .split(/\r?\n/g)
+    .split(/[,\uFF0C\r\n]+/g)
     .map((v) => v.trim())
     .filter(Boolean);
 }
